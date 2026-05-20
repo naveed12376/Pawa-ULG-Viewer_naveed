@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Flight Review · ULG Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="default.css" />
+  <script type="text/javascript" src="/eel.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <div class="aurora">
+    <span class="aurora-blob blob-1"></span>
+    <span class="aurora-blob blob-2"></span>
+    <span class="aurora-blob blob-3"></span>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"/>
+          <path d="M7 14l4-6 4 3 5-8"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Flight Review</h1>
+        <span class="brand-subtitle">PX4 standard plots</span>
+      </div>
+    </div>
+    <div class="topbar-center">
+      <div id="fileChip" class="file-chip">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <span id="fileName">Loading…</span>
+        <span id="fileStats" class="file-stats"></span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="printBtn" class="btn btn-ghost" title="Print / save as PDF">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9"/>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+          <rect x="6" y="14" width="12" height="8"/>
+        </svg>
+        Print
+      </button>
+      <button id="backBtn" class="btn btn-primary" onclick="window.close()">Close</button>
+    </div>
+  </header>
+
+  <main class="review">
+    <div id="loadingOverlay" class="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Building flight review…</div>
+    </div>
+    <div id="errorOverlay" class="error" hidden>
+      <h2>No file loaded</h2>
+      <p>Open the main window, load a ULG file, then click <strong>Default</strong> again.</p>
+    </div>
+    <div id="panelGrid" class="panel-grid" hidden></div>
+  </main>
+
+  <footer class="statusbar">
+    <span id="statusText">Loading…</span>
+    <span class="spacer"></span>
+    <span class="hint">PX4 Flight Review · standard plot set</span>
+  </footer>
+
+  <script src="default.js"></script>
+</body>
+</html>

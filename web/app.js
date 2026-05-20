@@ -60,6 +60,7 @@ const els = {
   quickPickBtn: $("#quickPickBtn"),
   quickPickMenu:$("#quickPickMenu"),
   quickPickList:$("#quickPickList"),
+  defaultBtn:   $("#defaultBtn"),
   plotBtn:      $("#plotBtn"),
   plotAllBtn:   $("#plotAllBtn"),
   clearBtn:     $("#clearBtn"),
@@ -97,6 +98,19 @@ els.browseBtn.addEventListener("click", async () => {
   const path = await eel.browse_file()();
   if (!path) { setStatus("File selection cancelled."); return; }
   await loadFile(path);
+});
+
+els.defaultBtn.addEventListener("click", () => {
+  if (!state.fileLoaded) {
+    toast("Load a ULG file first.", "error");
+    return;
+  }
+  const w = window.open("default.html", "_blank");
+  if (!w) {
+    toast("Popup blocked — allow popups to open the Default view.", "error");
+  } else {
+    setStatus("Opened Flight Review in a new tab.");
+  }
 });
 
 els.quickPickBtn.addEventListener("click", async (e) => {
