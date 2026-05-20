@@ -1,22 +1,34 @@
-"""ULG (PX4 ULog) File Viewer
-A Tkinter-based GUI for browsing and plotting all data inside a ULog file.
+"""ULG (PX4 ULog) File Viewer — PyQt6 edition.
+
+A modern, dark-themed GUI for browsing and plotting ULog files.
 Favorites are persisted to settings.txt in the workspace.
 """
 
+from __future__ import annotations
+
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from typing import Dict, List, Tuple
+
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QPalette, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QPushButton, QLabel, QLineEdit,
+    QFileDialog, QMessageBox, QTreeWidget, QTreeWidgetItem, QSplitter,
+    QVBoxLayout, QHBoxLayout, QFrame, QMenu, QStatusBar, QToolButton,
+    QSizePolicy, QStyle,
+)
 
 import matplotlib
-matplotlib.use("TkAgg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+matplotlib.use("QtAgg")
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
 try:
     from pyulog import ULog
 except ImportError:
-    print("Missing dependency: pyulog. Install it via:  pip install pyulog matplotlib")
+    print("Missing dependency: pyulog. Install it via:  pip install pyulog matplotlib PyQt6")
     sys.exit(1)
 
 
@@ -24,161 +36,488 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(SCRIPT_DIR, "settings.txt")
 
 
-class ULGViewer(tk.Tk):
+# Modern dark palette - inspired by Material / VSCode dark themes
+COLORS = {
+    "bg":        "#1e1f29",
+    "bg_alt":    "#282a36",
+    "panel":     "#21222c",
+    "border":    "#3a3d4d",
+    "text":      "#f8f8f2",
+    "text_dim":  "#9a9bb0",
+    "accent":    "#bd93f9",   # purple
+    "accent_2":  "#8be9fd",   # cyan
+    "success":   "#50fa7b",   # green
+    "warn":      "#ffb86c",   # orange
+    "danger":    "#ff5555",   # red
+    "muted":     "#44475a",
+}
+
+# Matplotlib dark style applied to the embedded figure
+PLT_BG = COLORS["panel"]
+PLT_FG = COLORS["text"]
+PLT_GRID = COLORS["muted"]
+MPL_COLOR_CYCLE = [
+    "#8be9fd", "#50fa7b", "#ffb86c", "#ff79c6",
+    "#bd93f9", "#f1fa8c", "#ff5555", "#6272a4",
+]
+
+STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['text']};
+    font-family: "Segoe UI", "Inter", "Helvetica Neue", sans-serif;
+    font-size: 10pt;
+}}
+
+QLabel#Header {{
+    font-size: 11pt;
+    font-weight: 600;
+    color: {COLORS['text']};
+    padding: 2px 0 6px 2px;
+}}
+QLabel#SubHeader {{
+    font-size: 9pt;
+    font-weight: 600;
+    color: {COLORS['text_dim']};
+    letter-spacing: 1px;
+    padding: 2px 0 4px 2px;
+}}
+QLabel#FileLabel {{
+    color: {COLORS['accent_2']};
+    font-style: italic;
+}}
+QLabel#StatusLabel {{
+    color: {COLORS['text_dim']};
+    padding: 4px 10px;
+}}
+
+QFrame#Card {{
+    background-color: {COLORS['panel']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 8px;
+    padding: 8px;
+}}
+
+QFrame#TopBar {{
+    background-color: {COLORS['bg_alt']};
+    border-bottom: 1px solid {COLORS['border']};
+}}
+
+QPushButton {{
+    background-color: {COLORS['bg_alt']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['muted']};
+    border-color: {COLORS['accent']};
+}}
+QPushButton:pressed {{
+    background-color: {COLORS['border']};
+}}
+QPushButton#Primary {{
+    background-color: {COLORS['accent']};
+    color: #1e1f29;
+    border: 1px solid {COLORS['accent']};
+    font-weight: 600;
+}}
+QPushButton#Primary:hover {{
+    background-color: #cda6ff;
+    border-color: #cda6ff;
+}}
+QPushButton#Danger {{
+    color: {COLORS['danger']};
+    border-color: {COLORS['border']};
+}}
+QPushButton#Danger:hover {{
+    background-color: rgba(255, 85, 85, 0.15);
+    border-color: {COLORS['danger']};
+}}
+
+QLineEdit {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    padding: 6px 10px;
+    selection-background-color: {COLORS['accent']};
+}}
+QLineEdit:focus {{
+    border-color: {COLORS['accent_2']};
+}}
+
+QTreeWidget {{
+    background-color: {COLORS['panel']};
+    alternate-background-color: {COLORS['bg_alt']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    outline: 0;
+    padding: 4px;
+    color: {COLORS['text']};
+}}
+QTreeWidget::item {{
+    padding: 4px 4px;
+    border-radius: 4px;
+}}
+QTreeWidget::item:hover {{
+    background-color: {COLORS['muted']};
+}}
+QTreeWidget::item:selected {{
+    background-color: {COLORS['accent']};
+    color: #1e1f29;
+}}
+QTreeWidget::branch {{
+    background: transparent;
+}}
+
+QHeaderView::section {{
+    background-color: {COLORS['bg_alt']};
+    color: {COLORS['text_dim']};
+    border: none;
+    padding: 6px;
+}}
+
+QScrollBar:vertical {{
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {COLORS['muted']};
+    border-radius: 5px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background-color: {COLORS['accent']};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {COLORS['muted']};
+    border-radius: 5px;
+    min-width: 24px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {COLORS['accent']};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+}}
+
+QSplitter::handle {{
+    background-color: {COLORS['border']};
+}}
+QSplitter::handle:horizontal {{
+    width: 3px;
+}}
+QSplitter::handle:vertical {{
+    height: 3px;
+}}
+QSplitter::handle:hover {{
+    background-color: {COLORS['accent']};
+}}
+
+QMenu {{
+    background-color: {COLORS['bg_alt']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['border']};
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 6px 18px;
+    border-radius: 4px;
+}}
+QMenu::item:selected {{
+    background-color: {COLORS['accent']};
+    color: #1e1f29;
+}}
+
+QStatusBar {{
+    background-color: {COLORS['bg_alt']};
+    color: {COLORS['text_dim']};
+    border-top: 1px solid {COLORS['border']};
+}}
+
+QToolBar {{
+    background-color: {COLORS['bg_alt']};
+    border: none;
+    spacing: 2px;
+}}
+QToolButton {{
+    background-color: transparent;
+    color: {COLORS['text']};
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px;
+}}
+QToolButton:hover {{
+    background-color: {COLORS['muted']};
+    border-color: {COLORS['border']};
+}}
+QToolButton:checked {{
+    background-color: {COLORS['accent']};
+    color: #1e1f29;
+}}
+"""
+
+
+class ULGViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("ULG Data Viewer")
-        self.geometry("1280x800")
-        self.minsize(900, 600)
+        self.setWindowTitle("ULG Data Viewer")
+        self.resize(1380, 860)
+        self.setMinimumSize(1000, 640)
 
         self.ulog = None
-        self.current_file = None
-        self.datasets = {}                # name -> pyulog.ULog.Data
-        self.field_map = {}               # tree item id -> (topic_name, field_name | None)
-        self.fav_map = {}                 # fav tree item id -> (topic_name, field_name)
-        self.favorites = self._load_favorites()  # list of (topic, field) preserving order
+        self.current_file: str | None = None
+        self.datasets: Dict[str, object] = {}
+        self.favorites: List[Tuple[str, str]] = self._load_favorites()
 
-        self._build_style()
+        self._apply_mpl_style()
         self._build_ui()
         self._refresh_favorites_tree()
-
-    # ----------------------------- UI ----------------------------- #
-    def _build_style(self):
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure("TButton", padding=6)
-        style.configure("Header.TLabel", font=("Segoe UI", 11, "bold"))
-        style.configure("Status.TLabel", foreground="#555")
-
-    def _build_ui(self):
-        # Top bar
-        top = ttk.Frame(self, padding=(10, 8))
-        top.pack(side=tk.TOP, fill=tk.X)
-
-        ttk.Button(top, text="Browse ULG File...", command=self.browse_file).pack(side=tk.LEFT)
-        self.file_label = ttk.Label(top, text="No file loaded", style="Status.TLabel")
-        self.file_label.pack(side=tk.LEFT, padx=12)
-
-        ttk.Button(top, text="Plot Selected", command=self.plot_selected).pack(side=tk.RIGHT)
-        ttk.Button(top, text="Plot All (Overview)", command=self.plot_all_overview).pack(side=tk.RIGHT, padx=6)
-        ttk.Button(top, text="Clear Plot", command=self.clear_plot).pack(side=tk.RIGHT)
-
-        # Main paned window: left=trees, right=plot
-        main = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
-        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-        # Left side - vertical paned: Favorites on top, Topics below
-        left = ttk.Panedwindow(main, orient=tk.VERTICAL)
-        main.add(left, weight=1)
-
-        # ---- Favorites pane ----
-        fav_frame = ttk.Frame(left)
-        left.add(fav_frame, weight=1)
-
-        fav_header = ttk.Frame(fav_frame)
-        fav_header.pack(fill=tk.X)
-        ttk.Label(fav_header, text="Favorites", style="Header.TLabel").pack(side=tk.LEFT, pady=(0, 4))
-        ttk.Button(fav_header, text="Remove", command=self.remove_selected_favorite, width=8)\
-            .pack(side=tk.RIGHT)
-
-        fav_tree_frame = ttk.Frame(fav_frame)
-        fav_tree_frame.pack(fill=tk.BOTH, expand=True)
-        self.fav_tree = ttk.Treeview(fav_tree_frame, selectmode="extended", show="tree")
-        fav_vsb = ttk.Scrollbar(fav_tree_frame, orient="vertical", command=self.fav_tree.yview)
-        self.fav_tree.configure(yscrollcommand=fav_vsb.set)
-        self.fav_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        fav_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.fav_tree.bind("<Double-1>", lambda e: self.plot_selected())
-        self.fav_tree.bind("<Delete>", lambda e: self.remove_selected_favorite())
-
-        self.fav_menu = tk.Menu(self, tearoff=0)
-        self.fav_menu.add_command(label="Remove from Favorites", command=self.remove_selected_favorite)
-        self.fav_menu.add_command(label="Plot", command=self.plot_selected)
-        self.fav_tree.bind("<Button-3>", self._on_fav_right_click)
-
-        # ---- Topics pane ----
-        topics_frame = ttk.Frame(left)
-        left.add(topics_frame, weight=3)
-
-        ttk.Label(topics_frame, text="Topics & Fields", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
-
-        search_frame = ttk.Frame(topics_frame)
-        search_frame.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(search_frame, text="Filter:").pack(side=tk.LEFT)
-        self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self._apply_filter())
-        ttk.Entry(search_frame, textvariable=self.search_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        tree_frame = ttk.Frame(topics_frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-        self.tree = ttk.Treeview(tree_frame, selectmode="extended", show="tree")
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree.bind("<Double-1>", lambda e: self.plot_selected())
-
-        self.tree_menu = tk.Menu(self, tearoff=0)
-        self.tree_menu.add_command(label="Add to Favorites", command=self.add_selected_to_favorites)
-        self.tree_menu.add_command(label="Plot", command=self.plot_selected)
-        self.tree.bind("<Button-3>", self._on_tree_right_click)
-
-        # ---- Right side - single persistent plot ----
-        right = ttk.Frame(main)
-        main.add(right, weight=4)
-
-        ttk.Label(right, text="Plot", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
-
-        self.figure = Figure(figsize=(9, 6), dpi=100)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=right)
-        toolbar_frame = ttk.Frame(right)
-        toolbar_frame.pack(side=tk.TOP, fill=tk.X)
-        self.toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame)
-        self.toolbar.update()
-        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self._draw_empty_message("Load a ULG file and select fields to plot.")
 
-        # Status bar
-        self.status = ttk.Label(self, text="Ready. Click 'Browse ULG File...' to begin.",
-                                style="Status.TLabel", anchor="w", padding=(10, 4))
-        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+    # ------------------------ Matplotlib style ------------------------ #
+    def _apply_mpl_style(self):
+        matplotlib.rcParams.update({
+            "figure.facecolor": PLT_BG,
+            "axes.facecolor":   PLT_BG,
+            "savefig.facecolor": PLT_BG,
+            "axes.edgecolor":   COLORS["border"],
+            "axes.labelcolor":  PLT_FG,
+            "axes.titlecolor":  PLT_FG,
+            "axes.titlesize":   10,
+            "axes.titleweight": "bold",
+            "axes.grid":        True,
+            "grid.color":       PLT_GRID,
+            "grid.alpha":       0.35,
+            "grid.linestyle":   "-",
+            "xtick.color":      PLT_FG,
+            "ytick.color":      PLT_FG,
+            "text.color":       PLT_FG,
+            "legend.facecolor": COLORS["bg_alt"],
+            "legend.edgecolor": COLORS["border"],
+            "legend.labelcolor": PLT_FG,
+            "legend.fontsize":  8,
+            "axes.prop_cycle":  matplotlib.cycler(color=MPL_COLOR_CYCLE),
+            "lines.linewidth":  1.1,
+        })
 
-    # ------------------ Right-click context menus ------------------ #
-    def _on_tree_right_click(self, event):
-        row = self.tree.identify_row(event.y)
-        if row:
-            if row not in self.tree.selection():
-                self.tree.selection_set(row)
-        try:
-            self.tree_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.tree_menu.grab_release()
+    # ------------------------------ UI ------------------------------ #
+    def _icon(self, sp: QStyle.StandardPixmap) -> QIcon:
+        return self.style().standardIcon(sp)
 
-    def _on_fav_right_click(self, event):
-        row = self.fav_tree.identify_row(event.y)
-        if row:
-            if row not in self.fav_tree.selection():
-                self.fav_tree.selection_set(row)
-        try:
-            self.fav_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self.fav_menu.grab_release()
+    def _build_ui(self):
+        self.setStatusBar(QStatusBar())
+        self._set_status("Ready. Click 'Browse ULG File…' to begin.")
 
-    # ------------------------ Favorites I/O ------------------------ #
-    def _load_favorites(self):
-        favs = []
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # -------- Top bar --------
+        top = QFrame(objectName="TopBar")
+        top_layout = QHBoxLayout(top)
+        top_layout.setContentsMargins(14, 10, 14, 10)
+        top_layout.setSpacing(10)
+
+        title = QLabel("ULG Data Viewer")
+        title.setObjectName("Header")
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setBold(True)
+        title.setFont(title_font)
+
+        self.browse_btn = QPushButton("  Browse ULG File…")
+        self.browse_btn.setObjectName("Primary")
+        self.browse_btn.setIcon(self._icon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.browse_btn.setIconSize(QSize(16, 16))
+        self.browse_btn.clicked.connect(self.browse_file)
+
+        self.file_label = QLabel("No file loaded")
+        self.file_label.setObjectName("FileLabel")
+
+        self.plot_btn = QPushButton("  Plot Selected")
+        self.plot_btn.setIcon(self._icon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.plot_btn.clicked.connect(self.plot_selected)
+
+        self.plot_all_btn = QPushButton("  Plot All (Overview)")
+        self.plot_all_btn.setIcon(self._icon(QStyle.StandardPixmap.SP_FileDialogContentsView))
+        self.plot_all_btn.clicked.connect(self.plot_all_overview)
+
+        self.clear_btn = QPushButton("  Clear Plot")
+        self.clear_btn.setObjectName("Danger")
+        self.clear_btn.setIcon(self._icon(QStyle.StandardPixmap.SP_DialogResetButton))
+        self.clear_btn.clicked.connect(self.clear_plot)
+
+        top_layout.addWidget(title)
+        top_layout.addSpacing(20)
+        top_layout.addWidget(self.browse_btn)
+        top_layout.addWidget(self.file_label, stretch=1)
+        top_layout.addWidget(self.clear_btn)
+        top_layout.addWidget(self.plot_all_btn)
+        top_layout.addWidget(self.plot_btn)
+
+        root.addWidget(top)
+
+        # -------- Main horizontal splitter --------
+        main_split = QSplitter(Qt.Orientation.Horizontal)
+        main_split.setContentsMargins(0, 0, 0, 0)
+        main_split.setHandleWidth(3)
+
+        # ----- Left side: vertical splitter (favorites on top, topics below) -----
+        left_split = QSplitter(Qt.Orientation.Vertical)
+        left_split.setHandleWidth(3)
+
+        # Favorites card
+        fav_card = QFrame(objectName="Card")
+        fav_v = QVBoxLayout(fav_card)
+        fav_v.setContentsMargins(10, 10, 10, 10)
+        fav_v.setSpacing(6)
+
+        fav_header_row = QHBoxLayout()
+        fav_title = QLabel("★  FAVORITES")
+        fav_title.setObjectName("SubHeader")
+        fav_title.setStyleSheet(f"color: {COLORS['warn']}; letter-spacing: 1.5px;")
+        fav_header_row.addWidget(fav_title)
+        fav_header_row.addStretch(1)
+
+        self.fav_remove_btn = QPushButton("Remove")
+        self.fav_remove_btn.setIcon(self._icon(QStyle.StandardPixmap.SP_TrashIcon))
+        self.fav_remove_btn.clicked.connect(self.remove_selected_favorite)
+        fav_header_row.addWidget(self.fav_remove_btn)
+        fav_v.addLayout(fav_header_row)
+
+        self.fav_tree = QTreeWidget()
+        self.fav_tree.setHeaderHidden(True)
+        self.fav_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.fav_tree.setAlternatingRowColors(False)
+        self.fav_tree.setRootIsDecorated(False)
+        self.fav_tree.itemDoubleClicked.connect(lambda *_: self.plot_selected())
+        self.fav_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.fav_tree.customContextMenuRequested.connect(self._on_fav_context_menu)
+        QShortcut(QKeySequence(Qt.Key.Key_Delete), self.fav_tree,
+                  activated=self.remove_selected_favorite)
+        fav_v.addWidget(self.fav_tree)
+
+        left_split.addWidget(fav_card)
+
+        # Topics card
+        topics_card = QFrame(objectName="Card")
+        topics_v = QVBoxLayout(topics_card)
+        topics_v.setContentsMargins(10, 10, 10, 10)
+        topics_v.setSpacing(6)
+
+        topics_title = QLabel("TOPICS & FIELDS")
+        topics_title.setObjectName("SubHeader")
+        topics_v.addWidget(topics_title)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍  Filter topics or fields…")
+        self.search_input.textChanged.connect(self._apply_filter)
+        topics_v.addWidget(self.search_input)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderHidden(True)
+        self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.tree.itemDoubleClicked.connect(lambda *_: self.plot_selected())
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+        topics_v.addWidget(self.tree)
+
+        left_split.addWidget(topics_card)
+        left_split.setSizes([220, 560])
+
+        main_split.addWidget(left_split)
+
+        # ----- Right side: plot card -----
+        plot_card = QFrame(objectName="Card")
+        plot_v = QVBoxLayout(plot_card)
+        plot_v.setContentsMargins(10, 10, 10, 10)
+        plot_v.setSpacing(6)
+
+        plot_title = QLabel("PLOT")
+        plot_title.setObjectName("SubHeader")
+        plot_v.addWidget(plot_title)
+
+        self.figure = Figure(figsize=(9, 6), dpi=100, facecolor=PLT_BG)
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        plot_v.addWidget(self.toolbar)
+        plot_v.addWidget(self.canvas, stretch=1)
+
+        main_split.addWidget(plot_card)
+        main_split.setSizes([380, 1000])
+
+        # Wrap in margin
+        outer = QWidget()
+        outer_l = QHBoxLayout(outer)
+        outer_l.setContentsMargins(10, 10, 10, 10)
+        outer_l.addWidget(main_split)
+        root.addWidget(outer, stretch=1)
+
+    def _set_status(self, msg: str):
+        self.statusBar().showMessage(msg)
+
+    # -------------------- Context menus -------------------- #
+    def _on_tree_context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.tree.selectedItems():
+            self.tree.setCurrentItem(item)
+
+        menu = QMenu(self)
+        add_action = QAction("★  Add to Favorites", self)
+        add_action.triggered.connect(self.add_selected_to_favorites)
+        plot_action = QAction("▶  Plot", self)
+        plot_action.triggered.connect(self.plot_selected)
+        menu.addAction(add_action)
+        menu.addSeparator()
+        menu.addAction(plot_action)
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _on_fav_context_menu(self, pos):
+        item = self.fav_tree.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.fav_tree.selectedItems():
+            self.fav_tree.setCurrentItem(item)
+
+        menu = QMenu(self)
+        remove = QAction("🗑  Remove from Favorites", self)
+        remove.triggered.connect(self.remove_selected_favorite)
+        plot_action = QAction("▶  Plot", self)
+        plot_action.triggered.connect(self.plot_selected)
+        menu.addAction(plot_action)
+        menu.addSeparator()
+        menu.addAction(remove)
+        menu.exec(self.fav_tree.viewport().mapToGlobal(pos))
+
+    # -------------------- Favorites I/O -------------------- #
+    def _load_favorites(self) -> List[Tuple[str, str]]:
+        favs: List[Tuple[str, str]] = []
         if not os.path.isfile(SETTINGS_FILE):
             return favs
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "|" not in line:
+                    if not line or line.startswith("#") or "|" not in line:
                         continue
                     topic, field = line.split("|", 1)
                     topic, field = topic.strip(), field.strip()
@@ -195,20 +534,16 @@ class ULGViewer(tk.Tk):
                 for topic, field in self.favorites:
                     f.write(f"{topic}|{field}\n")
         except Exception as e:
-            messagebox.showerror("Save failed", f"Could not write {SETTINGS_FILE}:\n{e}")
+            QMessageBox.critical(self, "Save failed", f"Could not write {SETTINGS_FILE}:\n{e}")
 
     def add_selected_to_favorites(self):
-        selected = self.tree.selection()
-        if not selected:
-            return
         added = 0
-        for item in selected:
-            mapping = self.field_map.get(item)
-            if not mapping:
+        for item in self.tree.selectedItems():
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if not data:
                 continue
-            topic, field = mapping
+            topic, field = data
             if field is None:
-                # Topic-level: add every field of this topic
                 dset = self.datasets.get(topic)
                 if not dset:
                     continue
@@ -225,153 +560,154 @@ class ULGViewer(tk.Tk):
         if added:
             self._save_favorites()
             self._refresh_favorites_tree()
-            self.status.config(text=f"Added {added} favorite(s).")
+            self._set_status(f"Added {added} favorite(s).")
         else:
-            self.status.config(text="Selected item(s) already in favorites.")
+            self._set_status("Selected item(s) already in favorites.")
 
     def remove_selected_favorite(self):
-        selected = self.fav_tree.selection()
-        if not selected:
-            return
         to_remove = []
-        for item in selected:
-            entry = self.fav_map.get(item)
-            if entry:
-                to_remove.append(entry)
+        for item in self.fav_tree.selectedItems():
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if data:
+                to_remove.append(tuple(data))
         if not to_remove:
             return
         self.favorites = [fv for fv in self.favorites if fv not in to_remove]
         self._save_favorites()
         self._refresh_favorites_tree()
-        self.status.config(text=f"Removed {len(to_remove)} favorite(s).")
+        self._set_status(f"Removed {len(to_remove)} favorite(s).")
 
     def _refresh_favorites_tree(self):
-        self.fav_tree.delete(*self.fav_tree.get_children())
-        self.fav_map.clear()
+        self.fav_tree.clear()
         for topic, field in self.favorites:
-            # Mark fields that aren't present in the currently loaded file
             missing = bool(self.ulog) and (
                 topic not in self.datasets or field not in self.datasets[topic].data
             )
-            label = f"{topic} / {field}" + ("   [not in file]" if missing else "")
-            iid = self.fav_tree.insert("", "end", text=label)
-            self.fav_map[iid] = (topic, field)
+            label = f"{topic}  ·  {field}"
+            if missing:
+                label += "   [not in file]"
+            it = QTreeWidgetItem([label])
+            it.setData(0, Qt.ItemDataRole.UserRole, (topic, field))
+            if missing:
+                it.setForeground(0, QColor(COLORS["text_dim"]))
+            else:
+                it.setForeground(0, QColor(COLORS["warn"]))
+            self.fav_tree.addTopLevelItem(it)
 
-    # --------------------------- File I/O --------------------------- #
+    # -------------------- File loading -------------------- #
     def browse_file(self):
         initial_dir = os.path.join(SCRIPT_DIR, "data")
         if not os.path.isdir(initial_dir):
             initial_dir = SCRIPT_DIR
-
-        path = filedialog.askopenfilename(
-            title="Select a ULG File",
-            initialdir=initial_dir,
-            filetypes=[("ULog files", "*.ulg"), ("All files", "*.*")],
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select a ULG File", initial_dir,
+            "ULog files (*.ulg);;All files (*)",
         )
-        if not path:
-            return
-        self.load_file(path)
+        if path:
+            self.load_file(path)
 
-    def load_file(self, path):
-        self.status.config(text=f"Loading {os.path.basename(path)}...")
-        self.update_idletasks()
+    def load_file(self, path: str):
+        self._set_status(f"Loading {os.path.basename(path)}…")
+        QApplication.processEvents()
         try:
             ulog = ULog(path)
         except Exception as e:
-            messagebox.showerror("Failed to load ULG", f"Could not load file:\n{e}")
-            self.status.config(text="Load failed.")
+            QMessageBox.critical(self, "Failed to load ULG", f"Could not load file:\n{e}")
+            self._set_status("Load failed.")
             return
 
         self.ulog = ulog
         self.current_file = path
-        self.datasets = {d.name + (f"_{d.multi_id}" if d.multi_id else ""): d for d in ulog.data_list}
-        self.file_label.config(text=os.path.basename(path))
+        self.datasets = {
+            d.name + (f"_{d.multi_id}" if d.multi_id else ""): d for d in ulog.data_list
+        }
+        self.file_label.setText(f"📄  {os.path.basename(path)}")
         self._populate_tree()
         self._refresh_favorites_tree()
-        self.clear_plot()
+        self._draw_empty_message("Pick fields from Favorites or Topics, then click Plot Selected.")
+
         n_topics = len(self.datasets)
         n_fields = sum(len(d.data) - 1 for d in self.datasets.values())
-        self.status.config(
-            text=f"Loaded {os.path.basename(path)}  |  {n_topics} topics, ~{n_fields} numeric fields."
+        self._set_status(
+            f"Loaded {os.path.basename(path)}   ·   "
+            f"{n_topics} topics, ~{n_fields} numeric fields."
         )
 
-    # ------------------------ Tree population ------------------------ #
-    def _populate_tree(self):
-        self.tree.delete(*self.tree.get_children())
-        self.field_map.clear()
+    # -------------------- Tree population -------------------- #
+    def _populate_tree(self, query: str = ""):
+        self.tree.clear()
+        query = query.strip().lower()
 
         for topic_name in sorted(self.datasets.keys()):
             dset = self.datasets[topic_name]
-            n_samples = len(next(iter(dset.data.values()))) if dset.data else 0
-            topic_id = self.tree.insert("", "end", text=f"{topic_name}  ({n_samples} samples)", open=False)
-            self.field_map[topic_id] = (topic_name, None)
-            for field in sorted(dset.data.keys()):
-                if field == "timestamp":
-                    continue
-                fid = self.tree.insert(topic_id, "end", text=field)
-                self.field_map[fid] = (topic_name, field)
+            all_fields = [f for f in sorted(dset.data.keys()) if f != "timestamp"]
 
-    def _apply_filter(self):
-        query = self.search_var.get().strip().lower()
-        if not query:
-            self._populate_tree()
-            return
-        self.tree.delete(*self.tree.get_children())
-        self.field_map.clear()
-
-        for topic_name in sorted(self.datasets.keys()):
-            dset = self.datasets[topic_name]
-            matching_fields = [f for f in sorted(dset.data.keys())
-                               if f != "timestamp" and (query in f.lower() or query in topic_name.lower())]
-            topic_match = query in topic_name.lower()
+            topic_match = (not query) or (query in topic_name.lower())
+            matching_fields = (
+                all_fields if topic_match
+                else [f for f in all_fields if query in f.lower()]
+            )
             if not matching_fields and not topic_match:
                 continue
-            n_samples = len(next(iter(dset.data.values()))) if dset.data else 0
-            topic_id = self.tree.insert("", "end", text=f"{topic_name}  ({n_samples} samples)", open=True)
-            self.field_map[topic_id] = (topic_name, None)
-            fields_to_show = matching_fields if not topic_match else [
-                f for f in sorted(dset.data.keys()) if f != "timestamp"
-            ]
-            for field in fields_to_show:
-                fid = self.tree.insert(topic_id, "end", text=field)
-                self.field_map[fid] = (topic_name, field)
+            fields_to_show = matching_fields if (matching_fields or topic_match) else all_fields
 
-    # --------------------------- Plotting --------------------------- #
-    def _topic_time_seconds(self, dset):
+            n_samples = len(next(iter(dset.data.values()))) if dset.data else 0
+            top = QTreeWidgetItem([f"{topic_name}    ({n_samples} samples)"])
+            top.setData(0, Qt.ItemDataRole.UserRole, (topic_name, None))
+            top.setForeground(0, QColor(COLORS["accent_2"]))
+            font = top.font(0)
+            font.setBold(True)
+            top.setFont(0, font)
+
+            for f in fields_to_show:
+                ch = QTreeWidgetItem([f])
+                ch.setData(0, Qt.ItemDataRole.UserRole, (topic_name, f))
+                top.addChild(ch)
+
+            self.tree.addTopLevelItem(top)
+            if query:
+                top.setExpanded(True)
+
+    def _apply_filter(self, text: str):
+        self._populate_tree(text)
+
+    # ------------------------- Plotting ------------------------- #
+    @staticmethod
+    def _topic_time_seconds(dset):
         ts = dset.data.get("timestamp")
         if ts is None or len(ts) == 0:
             return None
-        return (ts - ts[0]) / 1e6  # microseconds -> seconds
+        return (ts - ts[0]) / 1e6
 
-    def _draw_empty_message(self, msg):
+    def _draw_empty_message(self, msg: str):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
-        ax.text(0.5, 0.5, msg, ha="center", va="center", transform=ax.transAxes,
-                fontsize=11, color="#777")
+        ax.text(0.5, 0.5, msg, ha="center", va="center",
+                transform=ax.transAxes, fontsize=12, color=COLORS["text_dim"])
         ax.set_axis_off()
+        ax.set_facecolor(PLT_BG)
         self.canvas.draw_idle()
 
     def clear_plot(self):
-        self._draw_empty_message("Plot cleared. Select fields and click Plot Selected.")
-        self.status.config(text="Plot cleared.")
+        self._draw_empty_message("Plot cleared.")
+        self._set_status("Plot cleared.")
 
-    def _collect_selection(self):
-        """Build {topic: set(fields)} from both Favorites and Topics tree selections."""
-        by_topic = {}
+    def _collect_selection(self) -> Dict[str, set]:
+        by_topic: Dict[str, set] = {}
 
-        for item in self.fav_tree.selection():
-            entry = self.fav_map.get(item)
-            if not entry:
+        for item in self.fav_tree.selectedItems():
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if not data:
                 continue
-            topic, field = entry
+            topic, field = data
             if topic in self.datasets and field in self.datasets[topic].data:
                 by_topic.setdefault(topic, set()).add(field)
 
-        for item in self.tree.selection():
-            mapping = self.field_map.get(item)
-            if not mapping:
+        for item in self.tree.selectedItems():
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if not data:
                 continue
-            topic, field = mapping
+            topic, field = data
             if field is None:
                 dset = self.datasets.get(topic)
                 if not dset:
@@ -384,23 +720,30 @@ class ULGViewer(tk.Tk):
 
         return by_topic
 
+    def _style_axes(self, ax):
+        for spine in ax.spines.values():
+            spine.set_color(COLORS["border"])
+        ax.tick_params(colors=PLT_FG, labelsize=8)
+        ax.grid(True, color=PLT_GRID, alpha=0.35)
+        ax.set_facecolor(PLT_BG)
+
     def plot_selected(self):
         if not self.ulog:
-            messagebox.showinfo("No file", "Load a ULG file first.")
+            QMessageBox.information(self, "No file", "Load a ULG file first.")
             return
-
         by_topic = self._collect_selection()
         if not by_topic:
-            messagebox.showinfo("Nothing selected",
-                                "Select one or more entries in Favorites or Topics & Fields.")
+            QMessageBox.information(self, "Nothing selected",
+                                    "Select one or more entries in Favorites or Topics & Fields.")
             return
 
         self.figure.clear()
-        n_topics = len(by_topic)
         topics_sorted = sorted(by_topic.keys())
+        n = len(topics_sorted)
 
         for idx, topic in enumerate(topics_sorted, start=1):
-            ax = self.figure.add_subplot(n_topics, 1, idx)
+            ax = self.figure.add_subplot(n, 1, idx)
+            self._style_axes(ax)
             dset = self.datasets[topic]
             t = self._topic_time_seconds(dset)
             if t is None:
@@ -410,40 +753,39 @@ class ULGViewer(tk.Tk):
                 y = dset.data.get(f)
                 if y is None:
                     continue
-                ax.plot(t, y, label=f, linewidth=0.9)
-            ax.set_title(topic, fontsize=10)
+                ax.plot(t, y, label=f, linewidth=1.1)
+            ax.set_title(topic, color=COLORS["accent_2"], fontsize=10, fontweight="bold", loc="left")
             ax.set_ylabel("value", fontsize=8)
-            ax.grid(True, alpha=0.3)
-            ax.tick_params(labelsize=8)
             if len(fields) <= 12:
-                ax.legend(loc="best", fontsize=7)
-            if idx == n_topics:
-                ax.set_xlabel("time [s]")
+                leg = ax.legend(loc="best", fontsize=8, framealpha=0.85)
+                if leg:
+                    leg.get_frame().set_edgecolor(COLORS["border"])
+            if idx == n:
+                ax.set_xlabel("time [s]", fontsize=9)
 
         self.figure.tight_layout()
         self.canvas.draw_idle()
-        self.status.config(text=f"Plotted {n_topics} topic(s).")
+        self._set_status(f"Plotted {n} topic(s).")
 
     def plot_all_overview(self):
         if not self.ulog:
-            messagebox.showinfo("No file", "Load a ULG file first.")
+            QMessageBox.information(self, "No file", "Load a ULG file first.")
             return
-
         topics = [t for t in sorted(self.datasets.keys())
                   if self._topic_time_seconds(self.datasets[t]) is not None
                   and any(f != "timestamp" for f in self.datasets[t].data.keys())]
         if not topics:
             return
-
-        if not messagebox.askyesno(
-            "Plot all topics?",
+        reply = QMessageBox.question(
+            self, "Plot all topics?",
             f"This will draw one subplot per topic ({len(topics)} subplots) on a single figure.\n"
             "It may be cramped and slow to render. Continue?",
-        ):
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
-        self.status.config(text="Plotting all topics...")
-        self.update_idletasks()
+        self._set_status("Plotting all topics…")
+        QApplication.processEvents()
 
         self.figure.clear()
         n = len(topics)
@@ -453,24 +795,45 @@ class ULGViewer(tk.Tk):
 
         for i, topic in enumerate(topics, start=1):
             ax = self.figure.add_subplot(nrows, ncols, i)
+            self._style_axes(ax)
             dset = self.datasets[topic]
             t = self._topic_time_seconds(dset)
-            fields = [f for f in sorted(dset.data.keys()) if f != "timestamp"]
-            for f in fields:
-                ax.plot(t, dset.data[f], linewidth=0.7, label=f)
-            ax.set_title(topic, fontsize=8)
-            ax.grid(True, alpha=0.3)
-            ax.tick_params(labelsize=6)
+            for f in sorted(dset.data.keys()):
+                if f == "timestamp":
+                    continue
+                ax.plot(t, dset.data[f], linewidth=0.7)
+            ax.set_title(topic, fontsize=8, color=COLORS["accent_2"], loc="left")
             ax.set_xlabel("t [s]", fontsize=7)
 
         self.figure.tight_layout()
         self.canvas.draw_idle()
-        self.status.config(text=f"Plotted overview of {n} topics.")
+        self._set_status(f"Plotted overview of {n} topics.")
 
 
 def main():
-    app = ULGViewer()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    # Dark palette to override system widgets that don't use the stylesheet
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(COLORS["bg"]))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Base, QColor(COLORS["panel"]))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(COLORS["bg_alt"]))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLORS["bg_alt"]))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Text, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Button, QColor(COLORS["bg_alt"]))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(COLORS["accent"]))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(COLORS["bg"]))
+    app.setPalette(palette)
+
+    app.setStyleSheet(STYLESHEET)
+
+    viewer = ULGViewer()
+    viewer.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
