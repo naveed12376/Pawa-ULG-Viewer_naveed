@@ -1,16 +1,33 @@
-// Flight Review (Default plots) page logic
+// Flight Review (Default) page — entry view
 
 const els = {
-  fileName:   document.getElementById("fileName"),
-  fileStats:  document.getElementById("fileStats"),
-  statusText: document.getElementById("statusText"),
-  grid:       document.getElementById("panelGrid"),
-  loading:    document.getElementById("loadingOverlay"),
-  error:      document.getElementById("errorOverlay"),
-  printBtn:   document.getElementById("printBtn"),
+  fileName:    document.getElementById("fileName"),
+  fileChip:    document.getElementById("fileChip"),
+  fileStats:   document.getElementById("fileStats"),
+  statusText:  document.getElementById("statusText"),
+  grid:        document.getElementById("panelGrid"),
+  loading:     document.getElementById("loadingOverlay"),
+  welcome:     document.getElementById("welcomeOverlay"),
+  browseBtn:   document.getElementById("browseBtn"),
+  quickPickBtn:document.getElementById("quickPickBtn"),
+  quickPickMenu: document.getElementById("quickPickMenu"),
+  quickPickList: document.getElementById("quickPickList"),
+  printBtn:    document.getElementById("printBtn"),
+  customBtn:   document.getElementById("customBtn"),
+  toast:       document.getElementById("toast"),
+  dropOverlay: document.getElementById("dropOverlay"),
 };
 
-els.printBtn.addEventListener("click", () => window.print());
+let toastTimer = null;
+function toast(msg, kind = "") {
+  els.toast.textContent = msg;
+  els.toast.className = "toast " + (kind || "");
+  els.toast.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { els.toast.hidden = true; }, 2200);
+}
+
+function setStatus(msg) { els.statusText.textContent = msg; }
 
 const PLOTLY_CONFIG = {
   responsive: true,
@@ -19,35 +36,56 @@ const PLOTLY_CONFIG = {
   toImageButtonOptions: { format: "png", scale: 2 },
 };
 
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function plotTheme() {
+  return {
+    text:        cssVar("--plot-text"),
+    textDim:     cssVar("--plot-text-dim"),
+    grid:        cssVar("--plot-grid"),
+    zero:        cssVar("--plot-zero"),
+    axis:        cssVar("--plot-axis"),
+    tick:        cssVar("--plot-tick"),
+    legendBg:    cssVar("--plot-legend-bg"),
+    legendBord:  cssVar("--plot-legend-border"),
+    hoverBg:     cssVar("--plot-hover-bg"),
+    hoverBord:   cssVar("--plot-hover-border"),
+  };
+}
+
 function baseLayout(extra = {}) {
+  const t = plotTheme();
   return Object.assign({
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    font: { family: "Inter, sans-serif", size: 11, color: "#e7ecff" },
+    font: { family: "Inter, sans-serif", size: 11, color: t.text },
     margin: { l: 60, r: 24, t: 10, b: 40 },
     xaxis: {
-      gridcolor: "rgba(255,255,255,0.06)",
-      zerolinecolor: "rgba(255,255,255,0.12)",
-      linecolor: "rgba(255,255,255,0.15)",
-      tickcolor: "rgba(255,255,255,0.3)",
-      title: { text: "time [s]", font: { color: "#9aa3c7", size: 10 } },
+      gridcolor: t.grid,
+      zerolinecolor: t.zero,
+      linecolor: t.axis,
+      tickcolor: t.tick,
+      title: { text: "time [s]", font: { color: t.textDim, size: 10 } },
     },
     yaxis: {
-      gridcolor: "rgba(255,255,255,0.06)",
-      zerolinecolor: "rgba(255,255,255,0.12)",
-      linecolor: "rgba(255,255,255,0.15)",
-      tickcolor: "rgba(255,255,255,0.3)",
+      gridcolor: t.grid,
+      zerolinecolor: t.zero,
+      linecolor: t.axis,
+      tickcolor: t.tick,
     },
     legend: {
-      bgcolor: "rgba(22,26,43,0.55)",
-      bordercolor: "rgba(255,255,255,0.1)",
+      bgcolor: t.legendBg,
+      bordercolor: t.legendBord,
       borderwidth: 1,
       font: { size: 10 },
       orientation: "v",
-      x: 1.005, y: 1, xanchor: "left",
+      x: 1.005, xanchor: "left",
+      y: 0.88, yanchor: "top",
     },
     hovermode: "x unified",
-    hoverlabel: { bgcolor: "#161a2b", bordercolor: "rgba(167, 139, 250, 0.6)", font: { color: "#e7ecff" } },
+    hoverlabel: { bgcolor: t.hoverBg, bordercolor: t.hoverBord, font: { color: t.text } },
   }, extra);
 }
 
@@ -56,7 +94,7 @@ function renderTimePanel(target, panel) {
     x: s.t,
     y: s.y,
     name: s.name,
-    type: "scattergl",
+    type: "scatter",
     mode: "lines",
     line: { color: s.color || undefined, width: 1.3 },
     hovertemplate: `<b>${s.name}</b><br>t=%{x:.2f}s<br>val=%{y}<extra></extra>`,
@@ -70,14 +108,29 @@ function renderTimePanel(target, panel) {
 }
 
 function renderScatterXY(target, panel) {
-  const traces = panel.series.map(s => ({
-    x: s.x, y: s.y,
-    name: s.name,
-    type: "scattergl",
-    mode: "lines+markers",
-    line: { color: s.color || "#a78bfa", width: 1.5 },
-    marker: { size: 3, color: s.color || "#a78bfa" },
-  }));
+  const traces = panel.series.map(s => {
+    const mode = s.mode || "lines";
+    const color = s.color || "#a78bfa";
+    const trace = {
+      x: s.x, y: s.y,
+      name: s.name,
+      type: "scatter",
+      mode,
+      line: { color, width: 1.5 },
+      hovertemplate: `<b>${s.name}</b><br>E=%{x:.2f} m<br>N=%{y:.2f} m<extra></extra>`,
+    };
+    if (mode === "markers") {
+      trace.marker = {
+        size: 9,
+        color: "rgba(0,0,0,0)",
+        symbol: "circle",
+        line: { color, width: 1.6 },
+      };
+    } else {
+      trace.marker = { size: 3, color };
+    }
+    return trace;
+  });
   const layout = baseLayout({
     xaxis: Object.assign({}, baseLayout().xaxis, {
       title: { text: panel.xlabel || "", font: { color: "#9aa3c7", size: 10 } },
@@ -86,12 +139,12 @@ function renderScatterXY(target, panel) {
     yaxis: Object.assign({}, baseLayout().yaxis, {
       title: { text: panel.ylabel || "", font: { color: "#9aa3c7", size: 10 } }
     }),
-    showlegend: false,
+    showlegend: true,
   });
   Plotly.newPlot(target, traces, layout, PLOTLY_CONFIG);
 }
 
-function buildPanel(idx, panel) {
+function buildPanelDOM(idx, panel) {
   const section = document.createElement("section");
   section.className = "review-panel";
 
@@ -107,44 +160,215 @@ function buildPanel(idx, panel) {
   const body = document.createElement("div");
   body.className = "review-panel-body";
   const plotDiv = document.createElement("div");
-  plotDiv.className = "review-plot" + (panel.type === "scatter_xy" ? " tall" : "");
+  if (panel.type === "map") {
+    plotDiv.className = "review-map";
+  } else {
+    plotDiv.className = "review-plot" + (panel.type === "scatter_xy" ? " tall" : "");
+  }
   body.appendChild(plotDiv);
   section.appendChild(body);
 
   return { section, plotDiv };
 }
 
-async function init() {
-  els.statusText.textContent = "Requesting plot data…";
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return "0 seconds";
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  if (m > 0) return `${m}:${String(sec).padStart(2, "0")}`;
+  return `${sec} seconds`;
+}
+
+function formatHuman(seconds) {
+  if (!seconds || seconds <= 0) return "0 seconds";
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const parts = [];
+  if (h) parts.push(`${h} hour${h !== 1 ? "s" : ""}`);
+  if (m) parts.push(`${m} minute${m !== 1 ? "s" : ""}`);
+  if (sec || parts.length === 0) parts.push(`${sec} second${sec !== 1 ? "s" : ""}`);
+  return parts.join(" ");
+}
+
+function buildInfoCard(info) {
+  const wrap = document.createElement("section");
+  wrap.className = "info-card";
+
+  // Title — e.g. "PX4 Quadrotor"
+  const title = document.createElement("h2");
+  title.className = "info-card-title";
+  const titleText = info.airframe_group
+    ? `PX4 ${info.airframe_group.replace(/^Generic /, "")}`
+    : "PX4 Flight Log";
+  title.innerHTML = `<span>${titleText}</span>` +
+    (info.airframe_id ? `<span class="id-chip">${info.airframe_id}</span>` : "");
+  wrap.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.className = "info-grid";
+
+  // Left column — vehicle/software
+  const left = document.createElement("div");
+  left.className = "info-col";
+
+  const airframe = info.airframe_group
+    ? `${info.airframe_group} <span class="dim">/ ${info.airframe_name}</span>`
+    : "—";
+  const sw = info.sw_version + (info.sw_hash ? `  <span class="hash">(${info.sw_hash})</span>` : "");
+  const branch = info.branch && info.branch !== "—" ? `<br><span class="dim">branch: ${info.branch}</span>` : "";
+
+  const leftRows = [
+    ["Airframe",        airframe],
+    ["Hardware",        info.hardware],
+    ["Software Version", sw + branch],
+    ["OS Version",      info.os_label],
+    ["Estimator",       info.estimator],
+    ["Logging Duration", formatDuration(info.logging_duration_s)],
+    ["Vehicle Life Flight Time",
+        info.lifetime_s > 0 ? formatHuman(info.lifetime_s) : formatHuman(info.flight_time_s)],
+  ];
+  for (const [label, value] of leftRows) {
+    const l = document.createElement("div"); l.className = "info-label"; l.textContent = label + ":";
+    const v = document.createElement("div"); v.className = "info-value"; v.innerHTML = value;
+    left.appendChild(l); left.appendChild(v);
+  }
+  grid.appendChild(left);
+
+  // Right column — flight stats
+  const right = document.createElement("div");
+  right.className = "info-col";
+  const f = (n, unit) => (n != null && isFinite(n) ? `${n.toFixed(1)} ${unit}` : "—");
+  const rightRows = [
+    ["Distance",             f(info.distance_m, "m")],
+    ["Max Altitude Difference", f(info.max_altitude_diff_m, "m")],
+    ["Average Speed",        f(info.avg_speed_kmh, "km/h")],
+    ["Max Speed",            f(info.max_speed_kmh, "km/h")],
+    ["Max Speed Horizontal", f(info.max_speed_horizontal_kmh, "km/h")],
+    ["Max Speed Up",         f(info.max_speed_up_kmh, "km/h")],
+    ["Max Speed Down",       f(info.max_speed_down_kmh, "km/h")],
+    ["Max Tilt Angle",       f(info.max_tilt_deg, "deg")],
+  ];
+  for (const [label, value] of rightRows) {
+    const l = document.createElement("div"); l.className = "info-label"; l.textContent = label + ":";
+    const v = document.createElement("div"); v.className = "info-value"; v.textContent = value;
+    right.appendChild(l); right.appendChild(v);
+  }
+  grid.appendChild(right);
+
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function renderMap(target, panel) {
+  if (typeof L === "undefined") {
+    target.innerHTML = `<div class="empty-panel-text">Leaflet failed to load (offline?).</div>`;
+    return;
+  }
+  const s = panel.series && panel.series[0];
+  if (!s || !s.lat || s.lat.length < 2) {
+    target.innerHTML = `<div class="empty-panel-text">No valid GPS data.</div>`;
+    return;
+  }
+  const coords = s.lat.map((la, i) => [la, s.lon[i]]).filter(c => c[0] !== null && c[1] !== null);
+  if (coords.length < 2) {
+    target.innerHTML = `<div class="empty-panel-text">No valid GPS data.</div>`;
+    return;
+  }
+
+  const map = L.map(target, { zoomControl: true, attributionControl: true });
+
+  // Esri World Imagery (free, no API key, satellite tiles)
+  L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 19,
+      attribution:
+        "Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    }
+  ).addTo(map);
+
+  const line = L.polyline(coords, {
+    color: s.color || "#a78bfa",
+    weight: 3,
+    opacity: 0.95,
+  }).addTo(map);
+
+  // Start marker (green) + end marker (red)
+  const start = coords[0];
+  const end = coords[coords.length - 1];
+  const dot = (color) => L.divIcon({
+    className: "",
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+    html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 8px ${color};"></div>`,
+  });
+  L.marker(start, { icon: dot("#4ade80"), title: "Start" }).addTo(map).bindPopup("Start");
+  L.marker(end,   { icon: dot("#f87171"), title: "End"   }).addTo(map).bindPopup("End");
+
+  map.fitBounds(line.getBounds(), { padding: [24, 24] });
+  // Leaflet requires invalidateSize() once its container becomes visible/sized.
+  requestAnimationFrame(() => map.invalidateSize());
+}
+
+let _lastPanelsData = null;
+
+async function renderPanels() {
+  els.grid.innerHTML = "";
+  els.welcome.hidden = true;
+  els.loading.hidden = false;
+  setStatus("Requesting plot data…");
+
   let res;
   try {
     res = await eel.get_default_plot_data()();
   } catch (e) {
-    showError("Could not communicate with the backend.");
+    els.loading.hidden = true;
+    els.welcome.hidden = false;
+    toast("Backend error: " + e.message, "error");
     return;
   }
 
   if (!res || !res.ok) {
-    showError(res && res.error ? res.error : "No file loaded.");
+    els.loading.hidden = true;
+    els.welcome.hidden = false;
+    setStatus(res && res.error ? res.error : "No file loaded.");
     return;
   }
 
-  els.fileName.textContent = res.file_name || "(no name)";
-  els.fileStats.textContent = `${res.n_panels} panels`;
-  els.statusText.textContent = `Rendering ${res.n_panels} panels…`;
+  _lastPanelsData = res;
+  await renderPanelsFromData(res);
+}
 
+async function renderPanelsFromData(res) {
+  els.grid.innerHTML = "";
+  els.welcome.hidden = true;
+  els.fileStats.textContent = `${res.n_panels} panels`;
+  setStatus(`Rendering ${res.n_panels} panels…`);
   els.loading.hidden = true;
   els.grid.hidden = false;
 
-  // Render panels sequentially with a tiny delay so each shows up progressively
+  // File-info header card (shown above panel 01).
+  try {
+    const info = await eel.get_file_info()();
+    if (info && info.ok) {
+      els.grid.appendChild(buildInfoCard(info));
+    }
+  } catch (_) { /* non-fatal */ }
+
   for (let i = 0; i < res.panels.length; i++) {
     const p = res.panels[i];
-    const { section, plotDiv } = buildPanel(i, p);
+    const { section, plotDiv } = buildPanelDOM(i, p);
     els.grid.appendChild(section);
-    // Use requestAnimationFrame to let the DOM paint between panels
     await new Promise(resolve => requestAnimationFrame(resolve));
     try {
-      if (p.type === "scatter_xy") {
+      if (p.type === "map") {
+        renderMap(plotDiv, p);
+      } else if (p.type === "scatter_xy") {
         renderScatterXY(plotDiv, p);
       } else {
         renderTimePanel(plotDiv, p);
@@ -153,15 +377,191 @@ async function init() {
       plotDiv.innerHTML = `<div class="empty-panel-text">Could not render: ${e.message}</div>`;
     }
   }
-  els.statusText.textContent = `Done · ${res.n_panels} panels rendered`;
+  setStatus(`Done · ${res.n_panels} panels rendered`);
 }
 
-function showError(msg) {
+function showWelcome(msg) {
+  els.grid.hidden = true;
+  els.grid.innerHTML = "";
   els.loading.hidden = true;
-  els.error.hidden = false;
-  els.error.querySelector("p").innerHTML =
-    msg + "<br>Open the main window, load a ULG file, then click <strong>Default</strong> again.";
-  els.statusText.textContent = "Error";
+  els.welcome.hidden = false;
+  if (msg) setStatus(msg);
 }
 
-window.addEventListener("DOMContentLoaded", init);
+// ----- File loading -----
+async function loadFile(path) {
+  setStatus(`Loading ${path}…`);
+  const res = await eel.load_file(path)();
+  if (!res.ok) {
+    toast(res.error || "Failed to load file.", "error");
+    setStatus("Load failed.");
+    return;
+  }
+  els.fileName.textContent = res.file_name;
+  els.fileChip.classList.remove("empty");
+  toast(`Loaded ${res.file_name}`, "success");
+  await renderPanels();
+}
+
+els.browseBtn.addEventListener("click", async () => {
+  setStatus("Opening file dialog…");
+  const path = await eel.browse_file()();
+  if (!path) { setStatus("File selection cancelled."); return; }
+  await loadFile(path);
+});
+
+els.quickPickBtn.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (!els.quickPickMenu.hidden) {
+    els.quickPickMenu.hidden = true;
+    return;
+  }
+  const files = await eel.list_data_dir()();
+  els.quickPickList.innerHTML = "";
+  if (!files.length) {
+    els.quickPickList.innerHTML = `<div class="empty-state">No .ulg files in data/.</div>`;
+  } else {
+    files.forEach(f => {
+      const div = document.createElement("div");
+      div.className = "popover-item";
+      div.innerHTML = `<span>${f.name}</span><span class="popover-item-size">${f.size_kb} KB</span>`;
+      div.addEventListener("click", () => {
+        els.quickPickMenu.hidden = true;
+        loadFile(f.path);
+      });
+      els.quickPickList.appendChild(div);
+    });
+  }
+  els.quickPickMenu.hidden = false;
+});
+
+document.addEventListener("click", (e) => {
+  if (!els.quickPickMenu.hidden &&
+      !els.quickPickMenu.contains(e.target) &&
+      e.target !== els.quickPickBtn) {
+    els.quickPickMenu.hidden = true;
+  }
+});
+
+els.printBtn.addEventListener("click", () => window.print());
+
+els.customBtn.addEventListener("click", () => {
+  window.location.href = "index.html";
+});
+
+// ----- Drag & drop (path resolution, no upload) -----
+setupDragAndDrop({
+  dropOverlay: els.dropOverlay,
+  onFile: async (file) => {
+    if (!file.name.toLowerCase().endsWith(".ulg")) {
+      toast("Only .ulg files are supported.", "error");
+      return;
+    }
+    const res = await eel.resolve_dropped_file(file.name)();
+    if (!res.ok) {
+      toast(res.error || "Could not locate the file.", "error");
+      return;
+    }
+    await loadFile(res.path);
+  },
+});
+
+function setupDragAndDrop({ dropOverlay, onFile }) {
+  let dragDepth = 0;
+  const isFileDrag = (e) =>
+    e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+
+  window.addEventListener("dragenter", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    if (dragDepth === 1) {
+      dropOverlay.hidden = false;
+      document.body.classList.add("drag-active");
+    }
+  });
+  window.addEventListener("dragover", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) {
+      dropOverlay.hidden = true;
+      document.body.classList.remove("drag-active");
+    }
+  });
+  window.addEventListener("drop", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay.hidden = true;
+    document.body.classList.remove("drag-active");
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      onFile(files[0]);
+    }
+  });
+}
+
+// ----- Theme toggle -----
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("ulg-theme", theme);
+}
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") || "dark";
+}
+applyTheme(localStorage.getItem("ulg-theme") || "dark");
+
+function applyThemeToPlots() {
+  const t = plotTheme();
+  document.querySelectorAll(".review-plot").forEach(div => {
+    if (!div._fullLayout) return;
+    const update = {
+      "paper_bgcolor":          "rgba(0,0,0,0)",
+      "plot_bgcolor":           "rgba(0,0,0,0)",
+      "font.color":             t.text,
+      "legend.bgcolor":         t.legendBg,
+      "legend.bordercolor":     t.legendBord,
+      "hoverlabel.bgcolor":     t.hoverBg,
+      "hoverlabel.bordercolor": t.hoverBord,
+      "hoverlabel.font.color":  t.text,
+    };
+    Object.keys(div._fullLayout).forEach(k => {
+      if (/^[xy]axis\d*$/.test(k)) {
+        update[`${k}.gridcolor`]     = t.grid;
+        update[`${k}.zerolinecolor`] = t.zero;
+        update[`${k}.linecolor`]     = t.axis;
+        update[`${k}.tickcolor`]     = t.tick;
+        update[`${k}.tickfont.color`]= t.text;
+        const ax = div._fullLayout[k];
+        if (ax && ax.title && (ax.title.text || (ax.title._templateindex == null && ax.title.font))) {
+          update[`${k}.title.font.color`] = t.textDim;
+        }
+      }
+    });
+    try { Plotly.relayout(div, update); } catch (_) {}
+  });
+}
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  applyTheme(next);
+  // Update existing plots in place (no DOM teardown, no scroll jump).
+  applyThemeToPlots();
+});
+
+// ----- Init -----
+(async function init() {
+  const state = await eel.get_current_state()();
+  if (state && state.loaded) {
+    els.fileName.textContent = state.file_name;
+    els.fileChip.classList.remove("empty");
+    await renderPanels();
+  } else {
+    showWelcome("Ready. Click 'Browse ULG File' to begin.");
+  }
+})();

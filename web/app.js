@@ -15,41 +15,53 @@ const PLOT_COLORS = [
   "#c084fc", "#22d3ee", "#facc15", "#f87171",
 ];
 
-const PLOT_TEMPLATE = {
-  layout: {
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(0,0,0,0)",
-    font: { family: "Inter, sans-serif", size: 12, color: "#e7ecff" },
-    margin: { l: 60, r: 30, t: 40, b: 50 },
-    xaxis: {
-      gridcolor: "rgba(255,255,255,0.06)",
-      zerolinecolor: "rgba(255,255,255,0.12)",
-      linecolor: "rgba(255,255,255,0.15)",
-      tickcolor: "rgba(255,255,255,0.3)",
-      title: { text: "time [s]", font: { color: "#9aa3c7", size: 11 } },
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function buildPlotTemplate() {
+  return {
+    layout: {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { family: "Inter, sans-serif", size: 12, color: cssVar("--plot-text") },
+      margin: { l: 60, r: 30, t: 40, b: 50 },
+      xaxis: {
+        gridcolor: cssVar("--plot-grid"),
+        zerolinecolor: cssVar("--plot-zero"),
+        linecolor: cssVar("--plot-axis"),
+        tickcolor: cssVar("--plot-tick"),
+        title: { text: "time [s]", font: { color: cssVar("--plot-text-dim"), size: 11 } },
+      },
+      yaxis: {
+        gridcolor: cssVar("--plot-grid"),
+        zerolinecolor: cssVar("--plot-zero"),
+        linecolor: cssVar("--plot-axis"),
+        tickcolor: cssVar("--plot-tick"),
+      },
+      legend: {
+        bgcolor: cssVar("--plot-legend-bg"),
+        bordercolor: cssVar("--plot-legend-border"),
+        borderwidth: 1,
+        font: { size: 11 },
+        orientation: "v",
+        x: 1.005, xanchor: "left",
+        y: 0.88, yanchor: "top",
+      },
+      hovermode: "x unified",
+      hoverlabel: { bgcolor: cssVar("--plot-hover-bg"), bordercolor: cssVar("--plot-hover-border"),
+                    font: { color: cssVar("--plot-text") } },
     },
-    yaxis: {
-      gridcolor: "rgba(255,255,255,0.06)",
-      zerolinecolor: "rgba(255,255,255,0.12)",
-      linecolor: "rgba(255,255,255,0.15)",
-      tickcolor: "rgba(255,255,255,0.3)",
+    config: {
+      responsive: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ["lasso2d", "select2d"],
+      toImageButtonOptions: { format: "png", scale: 2, filename: "ulg_plot" },
     },
-    legend: {
-      bgcolor: "rgba(22,26,43,0.6)",
-      bordercolor: "rgba(255,255,255,0.1)",
-      borderwidth: 1,
-      font: { size: 11 },
-    },
-    hovermode: "x unified",
-    hoverlabel: { bgcolor: "#161a2b", bordercolor: "rgba(167, 139, 250, 0.6)", font: { color: "#e7ecff" } },
-  },
-  config: {
-    responsive: true,
-    displaylogo: false,
-    modeBarButtonsToRemove: ["lasso2d", "select2d"],
-    toImageButtonOptions: { format: "png", scale: 2, filename: "ulg_plot" },
-  },
-};
+  };
+}
+
+const PLOT_TEMPLATE = buildPlotTemplate();
 
 // ========== DOM helpers ==========
 const $ = (sel) => document.querySelector(sel);
@@ -77,6 +89,7 @@ const els = {
   plot:         $("#plot"),
   contextMenu:  $("#contextMenu"),
   toast:        $("#toast"),
+  dropOverlay:  $("#dropOverlay"),
 };
 
 function setStatus(msg) { els.statusText.textContent = msg; }
@@ -101,17 +114,65 @@ els.browseBtn.addEventListener("click", async () => {
 });
 
 els.defaultBtn.addEventListener("click", () => {
-  if (!state.fileLoaded) {
-    toast("Load a ULG file first.", "error");
-    return;
-  }
-  const w = window.open("default.html", "_blank");
-  if (!w) {
-    toast("Popup blocked — allow popups to open the Default view.", "error");
-  } else {
-    setStatus("Opened Flight Review in a new tab.");
-  }
+  window.location.href = "default.html";
 });
+
+// ----- Drag & drop (path resolution, no upload) -----
+setupDragAndDrop({
+  dropOverlay: els.dropOverlay,
+  onFile: async (file) => {
+    if (!file.name.toLowerCase().endsWith(".ulg")) {
+      toast("Only .ulg files are supported.", "error");
+      return;
+    }
+    const res = await eel.resolve_dropped_file(file.name)();
+    if (!res.ok) {
+      toast(res.error || "Could not locate the file.", "error");
+      return;
+    }
+    await loadFile(res.path);
+  },
+});
+
+function setupDragAndDrop({ dropOverlay, onFile }) {
+  let dragDepth = 0;
+  const isFileDrag = (e) =>
+    e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+
+  window.addEventListener("dragenter", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    if (dragDepth === 1) {
+      dropOverlay.hidden = false;
+      document.body.classList.add("drag-active");
+    }
+  });
+  window.addEventListener("dragover", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) {
+      dropOverlay.hidden = true;
+      document.body.classList.remove("drag-active");
+    }
+  });
+  window.addEventListener("drop", (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay.hidden = true;
+    document.body.classList.remove("drag-active");
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      onFile(files[0]);
+    }
+  });
+}
 
 els.quickPickBtn.addEventListener("click", async (e) => {
   e.stopPropagation();
@@ -495,7 +556,10 @@ async function doPlotAll() {
   setStatus(`Plotted overview of ${res.groups.length} topics.`);
 }
 
+let _lastPlotGroups = null;
+
 function renderPlot(groups) {
+  _lastPlotGroups = groups;
   // Clear empty-state
   els.plot.innerHTML = "";
 
@@ -523,10 +587,10 @@ function renderPlot(groups) {
     ];
     yAxisLayout[yAxisName] = {
       domain,
-      gridcolor: "rgba(255,255,255,0.06)",
-      zerolinecolor: "rgba(255,255,255,0.12)",
-      linecolor: "rgba(255,255,255,0.15)",
-      tickcolor: "rgba(255,255,255,0.3)",
+      gridcolor: cssVar("--plot-grid"),
+      zerolinecolor: cssVar("--plot-zero"),
+      linecolor: cssVar("--plot-axis"),
+      tickcolor: cssVar("--plot-tick"),
       automargin: true,
     };
     annotations.push({
@@ -535,7 +599,7 @@ function renderPlot(groups) {
       x: 0, y: domain[1],
       xanchor: "left", yanchor: "bottom",
       showarrow: false,
-      font: { color: "#67e8f9", size: 12 },
+      font: { color: cssVar("--accent-2"), size: 12 },
     });
     for (const s of g.series) {
       traces.push({
@@ -553,16 +617,17 @@ function renderPlot(groups) {
     }
   }
 
-  const layout = JSON.parse(JSON.stringify(PLOT_TEMPLATE.layout));
+  const tmpl = buildPlotTemplate();
+  const layout = JSON.parse(JSON.stringify(tmpl.layout));
   Object.assign(layout, yAxisLayout);
   layout.height = totalHeight;
   layout.showlegend = true;
   layout.annotations = annotations;
   layout.xaxis.domain = [0, 1];
   // Use only the bottom axis label
-  layout.xaxis.title = { text: "time [s]", font: { color: "#9aa3c7", size: 11 } };
+  layout.xaxis.title = { text: "time [s]", font: { color: cssVar("--plot-text-dim"), size: 11 } };
 
-  Plotly.newPlot(els.plot, traces, layout, PLOT_TEMPLATE.config);
+  Plotly.newPlot(els.plot, traces, layout, tmpl.config);
 }
 
 function resetPlotEmpty(message) {
@@ -581,12 +646,90 @@ function resetPlotEmpty(message) {
     </div>`;
 }
 
+// ========== Theme toggle ==========
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("ulg-theme", theme);
+}
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") || "dark";
+}
+applyTheme(localStorage.getItem("ulg-theme") || "dark");
+
+function applyThemeToPlots() {
+  const text = cssVar("--plot-text");
+  const textDim = cssVar("--plot-text-dim");
+  const grid = cssVar("--plot-grid");
+  const zero = cssVar("--plot-zero");
+  const axis = cssVar("--plot-axis");
+  const tick = cssVar("--plot-tick");
+  const legendBg = cssVar("--plot-legend-bg");
+  const legendBord = cssVar("--plot-legend-border");
+  const hoverBg = cssVar("--plot-hover-bg");
+  const hoverBord = cssVar("--plot-hover-border");
+  const accent2 = cssVar("--accent-2");
+
+  const div = els.plot;
+  if (!div || !div._fullLayout) return;
+
+  const update = {
+    "paper_bgcolor":          "rgba(0,0,0,0)",
+    "plot_bgcolor":           "rgba(0,0,0,0)",
+    "font.color":             text,
+    "legend.bgcolor":         legendBg,
+    "legend.bordercolor":     legendBord,
+    "hoverlabel.bgcolor":     hoverBg,
+    "hoverlabel.bordercolor": hoverBord,
+    "hoverlabel.font.color":  text,
+  };
+  Object.keys(div._fullLayout).forEach(k => {
+    if (/^[xy]axis\d*$/.test(k)) {
+      update[`${k}.gridcolor`]      = grid;
+      update[`${k}.zerolinecolor`]  = zero;
+      update[`${k}.linecolor`]      = axis;
+      update[`${k}.tickcolor`]      = tick;
+      update[`${k}.tickfont.color`] = text;
+      const ax = div._fullLayout[k];
+      if (ax && ax.title && ax.title.text) {
+        update[`${k}.title.font.color`] = textDim;
+      }
+    }
+  });
+  // Update each topic-label annotation color
+  if (Array.isArray(div._fullLayout.annotations)) {
+    div._fullLayout.annotations.forEach((_, i) => {
+      update[`annotations[${i}].font.color`] = accent2;
+    });
+  }
+  try { Plotly.relayout(div, update); } catch (_) {}
+}
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  applyTheme(next);
+  // Update plot colors in place — no re-render, no scroll/layout shift.
+  applyThemeToPlots();
+});
+
 // ========== Boot ==========
 (async function init() {
-  // Load favorites even before file is loaded
-  const favs = await eel.get_favorites()();
-  state.favorites = favs.map(f => ({ ...f, present: false }));
-  renderFavorites();
-  renderTopics();
-  setStatus("Ready. Click 'Browse ULG File' to begin.");
+  // Restore loaded-file state if user navigated here from Flight Review
+  const current = await eel.get_current_state()();
+  if (current && current.loaded) {
+    state.fileLoaded = true;
+    state.topics = current.topics;
+    els.fileName.textContent = current.file_name;
+    els.fileChip.classList.remove("empty");
+    els.fileStats.textContent = `${current.n_topics} topics · ${current.n_fields} fields`;
+    setStatus(`Loaded ${current.file_name} — ${current.n_topics} topics, ${current.n_fields} numeric fields.`);
+    renderTopics();
+    await refreshFavorites();
+    resetPlotEmpty("Pick fields from Favorites or Topics, then click Plot Selected.");
+  } else {
+    const favs = await eel.get_favorites()();
+    state.favorites = favs.map(f => ({ ...f, present: false }));
+    renderFavorites();
+    renderTopics();
+    setStatus("Ready. Click 'Browse ULG File' to begin.");
+  }
 })();

@@ -352,7 +352,20 @@ def _quat_to_euler_deg_d(topic: str):
     return t, roll, pitch, yaw
 
 
-def _series(name: str, t, y, color: Optional[str] = None) -> Optional[dict]:
+_MAX_POINTS_PER_SERIES = 6000  # downsample threshold for the default review page
+
+
+def _downsample(t, y, max_points: int = _MAX_POINTS_PER_SERIES):
+    """Uniform-stride downsample two parallel arrays to <= max_points."""
+    n = len(t)
+    if n <= max_points:
+        return t, y
+    step = int(math.ceil(n / max_points))
+    return t[::step], y[::step]
+
+
+def _series(name: str, t, y, color: Optional[str] = None,
+            downsample: bool = True) -> Optional[dict]:
     if t is None or y is None:
         return None
     if len(t) == 0 or len(y) == 0:
@@ -360,7 +373,10 @@ def _series(name: str, t, y, color: Optional[str] = None) -> Optional[dict]:
     if len(t) != len(y):
         n = min(len(t), len(y))
         t = t[:n]; y = y[:n]
-    out = {"name": name, "t": _clean_array(np.asarray(t)), "y": _clean_array(np.asarray(y))}
+    t = np.asarray(t); y = np.asarray(y)
+    if downsample:
+        t, y = _downsample(t, y)
+    out = {"name": name, "t": _clean_array(t), "y": _clean_array(y)}
     if color:
         out["color"] = color
     return out
@@ -382,21 +398,134 @@ def _build_default_panels() -> List[dict]:
     C_Y   = "#3ecf8e"
     C_Z   = "#5dade2"
 
-    # ---------- 1. GPS Trajectory (local X/Y or lat/lon scatter) ----------
+    # ---------- 0. GPS Trajectory on satellite map ----------
+    lat = _get("vehicle_gps_position", "latitude_deg")
+    lon = _get("vehicle_gps_position", "longitude_deg")
+    if lat is None or lon is None:
+        # Fallback to legacy field names
+        lat = _get("sensor_gps", "latitude_deg")
+        lon = _get("sensor_gps", "longitude_deg")
+    if lat is not None and lon is not None:
+        lat_arr = np.asarray(lat)
+        lon_arr = np.asarray(lon)
+        # PX4 SITL frequently logs 0,0 before GPS fix; drop those samples.
+        valid = (np.abs(lat_arr) > 1e-6) & (np.abs(lon_arr) > 1e-6) & \
+                np.isfinite(lat_arr) & np.isfinite(lon_arr)
+        lat_arr = lat_arr[valid]
+        lon_arr = lon_arr[valid]
+        if lat_arr.size > 1:
+            lat_ds, lon_ds = _downsample(lat_arr, lon_arr)
+            panels.append({
+                "title": "GPS Trajectory (Satellite)",
+                "type": "map",
+                "ylabel": "",
+                "series": [{
+                    "name": "Trajectory",
+                    "lat": _clean_array(lat_ds),
+                    "lon": _clean_array(lon_ds),
+                    "color": "#a78bfa",
+                }],
+            })
+
+    # ---------- 1. Position (X/Y) — multi-series like PX4 Flight Review ----------
     lp_x = _get("vehicle_local_position", "x")
     lp_y = _get("vehicle_local_position", "y")
+
+    # Local frame origin (used to project lat/lon to north/east meters)
+    ref_lat_arr = _get("vehicle_local_position", "ref_lat")
+    ref_lon_arr = _get("vehicle_local_position", "ref_lon")
+    ref_lat = float(ref_lat_arr[-1]) if ref_lat_arr is not None and len(ref_lat_arr) > 0 else None
+    ref_lon = float(ref_lon_arr[-1]) if ref_lon_arr is not None and len(ref_lon_arr) > 0 else None
+
+    def _project_to_ne(lat_a, lon_a):
+        """Equirectangular projection of lat/lon -> (north_m, east_m) about (ref_lat, ref_lon)."""
+        if ref_lat is None or ref_lon is None:
+            return None, None
+        EARTH_R = 6371000.0
+        ref_lat_rad = math.radians(ref_lat)
+        dlat = np.radians(np.asarray(lat_a) - ref_lat)
+        dlon = np.radians(np.asarray(lon_a) - ref_lon)
+        return dlat * EARTH_R, dlon * EARTH_R * math.cos(ref_lat_rad)
+
+    def _xy_series(name, north, east, color, mode="lines"):
+        """Convert a (north, east) pair into a chart-space (x=east, y=north) trace."""
+        if north is None or east is None or len(north) == 0:
+            return None
+        valid = np.isfinite(np.asarray(north)) & np.isfinite(np.asarray(east))
+        n = np.asarray(north)[valid]
+        e = np.asarray(east)[valid]
+        if n.size == 0:
+            return None
+        e_ds, n_ds = _downsample(e, n)
+        return {
+            "name": name,
+            "x": _clean_array(e_ds),
+            "y": _clean_array(n_ds),
+            "color": color,
+            "mode": mode,
+        }
+
+    xy_series = []
+
+    # Estimated — vehicle_local_position
     if lp_x is not None and lp_y is not None:
+        s = _xy_series("Estimated", np.asarray(lp_x), np.asarray(lp_y), C_EST, "lines")
+        if s: xy_series.append(s)
+
+    # Setpoint — vehicle_local_position_setpoint
+    sp_x = _get("vehicle_local_position_setpoint", "x")
+    sp_y = _get("vehicle_local_position_setpoint", "y")
+    if sp_x is not None and sp_y is not None:
+        s = _xy_series("Setpoint", np.asarray(sp_x), np.asarray(sp_y), C_SP, "lines")
+        if s: xy_series.append(s)
+
+    # Groundtruth — vehicle_local_position_groundtruth (SITL only)
+    gt_x = _get("vehicle_local_position_groundtruth", "x")
+    gt_y = _get("vehicle_local_position_groundtruth", "y")
+    if gt_x is not None and gt_y is not None:
+        s = _xy_series("Groundtruth", np.asarray(gt_x), np.asarray(gt_y), C_GT, "lines")
+        if s: xy_series.append(s)
+
+    # GPS (projected) — vehicle_gps_position lat/lon projected to local NE
+    gps_lat = _get("vehicle_gps_position", "latitude_deg")
+    gps_lon = _get("vehicle_gps_position", "longitude_deg")
+    if gps_lat is not None and gps_lon is not None and ref_lat is not None:
+        lat_a = np.asarray(gps_lat); lon_a = np.asarray(gps_lon)
+        valid = (np.abs(lat_a) > 1e-6) & (np.abs(lon_a) > 1e-6) & \
+                np.isfinite(lat_a) & np.isfinite(lon_a)
+        if valid.any():
+            n, e = _project_to_ne(lat_a[valid], lon_a[valid])
+            s = _xy_series("GPS (projected)", n, e, "#5dade2", "lines")
+            if s: xy_series.append(s)
+
+    # Position Setpoints — position_setpoint_triplet.current.lat/lon (markers)
+    psp_lat = _get("position_setpoint_triplet", "current.lat")
+    psp_lon = _get("position_setpoint_triplet", "current.lon")
+    psp_valid = _get("position_setpoint_triplet", "current.valid")
+    if psp_lat is not None and psp_lon is not None and ref_lat is not None:
+        lat_a = np.asarray(psp_lat); lon_a = np.asarray(psp_lon)
+        valid = (np.abs(lat_a) > 1e-6) & (np.abs(lon_a) > 1e-6) & \
+                np.isfinite(lat_a) & np.isfinite(lon_a)
+        if psp_valid is not None:
+            valid = valid & (np.asarray(psp_valid) > 0)
+        if valid.any():
+            lat_ok = lat_a[valid]; lon_ok = lon_a[valid]
+            # Keep only distinct consecutive waypoints
+            if lat_ok.size > 1:
+                changed = (np.diff(lat_ok) != 0) | (np.diff(lon_ok) != 0)
+                keep = np.concatenate(([True], changed))
+                lat_ok = lat_ok[keep]; lon_ok = lon_ok[keep]
+            n, e = _project_to_ne(lat_ok, lon_ok)
+            s = _xy_series("Position Setpoints", n, e, "#e879c5", "markers")
+            if s: xy_series.append(s)
+
+    if xy_series:
         panels.append({
             "title": "Position (X/Y)",
             "type": "scatter_xy",
-            "xlabel": "Y [m] (East)",
-            "ylabel": "X [m] (North)",
-            "series": [{
-                "name": "Trajectory",
-                "x": _clean_array(np.asarray(lp_y)),
-                "y": _clean_array(np.asarray(lp_x)),
-                "color": "#a78bfa",
-            }],
+            "xlabel": "[m] East",
+            "ylabel": "[m] North",
+            "series": xy_series,
         })
 
     # ---------- 2. Altitude Estimate ----------
@@ -670,6 +799,209 @@ def _build_default_panels() -> List[dict]:
     return panels
 
 
+# --------------- Drag-drop path resolution (no upload) --------------- #
+@eel.expose
+def resolve_dropped_file(name: str) -> dict:
+    """Resolve a dropped file by NAME only (browser strips the absolute path).
+
+    Searches the workspace data/ folder and SCRIPT_DIR for a matching file.
+    Returns {ok, path} on success, or {ok: False, error} otherwise.
+    """
+    if not name:
+        return {"ok": False, "error": "Empty filename."}
+    base = os.path.basename(name)
+    # Search candidate directories in priority order.
+    search_dirs = [DATA_DIR, SCRIPT_DIR]
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        candidate = os.path.join(d, base)
+        if os.path.isfile(candidate):
+            return {"ok": True, "path": candidate}
+    return {"ok": False, "error": (
+        f"Could not locate '{base}'. Drag-drop only resolves files inside "
+        f"the data/ folder. Use Browse to pick from anywhere."
+    )}
+
+
+# ----------------------- ULog metadata + flight stats ----------------------- #
+# Common PX4 SITL airframes — extend as needed.
+AIRFRAME_NAMES: Dict[int, Tuple[str, str]] = {
+    4001: ("Generic Quadcopter",            "Quadrotor x"),
+    4002: ("Generic 250 Racer",             "Quadrotor x"),
+    4010: ("Generic Quadplane VTOL",        "Standard VTOL"),
+    4011: ("Tiltrotor VTOL",                "Tiltrotor VTOL"),
+    4012: ("Standard VTOL",                 "Standard VTOL"),
+    4013: ("Tailsitter VTOL",               "Tailsitter VTOL"),
+    4015: ("3DR Iris",                      "Quadrotor x"),
+    4017: ("HippoCampus AUV",               "AUV"),
+    4019: ("Holybro X500",                  "Quadrotor x"),
+    6001: ("Generic Hexarotor",             "Hexarotor x"),
+    8001: ("Generic Octacopter",            "Octorotor x"),
+}
+
+
+def _decode_version(v) -> str:
+    """Decode PX4's packed semver int into 'vMAJOR.MINOR.PATCH (type)' string."""
+    if not isinstance(v, int) or v <= 0:
+        return ""
+    major = (v >> 24) & 0xff
+    minor = (v >> 16) & 0xff
+    patch = (v >> 8) & 0xff
+    type_byte = v & 0xff
+    suffix_map = {0: "dev", 64: "alpha", 128: "beta", 192: "rc", 255: ""}
+    suffix = suffix_map.get(type_byte, "")
+    base = f"v{major}.{minor}.{patch}"
+    return f"{base} ({suffix})" if suffix else base
+
+
+def _decode_os_version(v) -> str:
+    if not isinstance(v, int) or v <= 0:
+        return ""
+    major = (v >> 24) & 0xff
+    minor = (v >> 16) & 0xff
+    patch = (v >> 8) & 0xff
+    return f"v{major}.{minor}.{patch}"
+
+
+@eel.expose
+def get_file_info() -> dict:
+    """Extract metadata + flight statistics from the currently loaded ULog."""
+    if not state.ulog:
+        return {"ok": False, "error": "No file loaded."}
+
+    info_dict = state.ulog.msg_info_dict or {}
+    params = state.ulog.initial_parameters or {}
+
+    airframe_id = int(params.get("SYS_AUTOSTART", 0))
+    af_group, af_name = AIRFRAME_NAMES.get(airframe_id, ("", ""))
+
+    sw_full = info_dict.get("ver_sw", "")
+    sw_short = sw_full[:8] if isinstance(sw_full, str) else ""
+    sw_decoded = _decode_version(info_dict.get("ver_sw_release"))
+    os_decoded = _decode_os_version(info_dict.get("sys_os_ver_release"))
+
+    # Estimator: PX4 always uses EKF2 in recent versions; check EKF2_EN to confirm.
+    ekf2_en = params.get("EKF2_EN", 1)
+    estimator = "EKF2" if ekf2_en else "—"
+
+    duration_s = (state.ulog.last_timestamp - state.ulog.start_timestamp) / 1e6
+
+    # Flight time within this log = sum of intervals where the vehicle was NOT landed.
+    flight_time_s = 0.0
+    vld = state.datasets.get("vehicle_land_detected")
+    if vld is not None and "landed" in vld.data and "timestamp" in vld.data:
+        ts = np.asarray(vld.data["timestamp"], dtype=np.int64)
+        landed = np.asarray(vld.data["landed"]).astype(bool)
+        if ts.size > 1:
+            dt_us = np.diff(ts).astype(np.float64)
+            in_air = ~landed[:-1]
+            flight_time_s = float(np.sum(dt_us[in_air])) / 1e6
+    # Fallback: if no land-detector data, derive from actuator_armed transitions.
+    if flight_time_s == 0.0:
+        aa = state.datasets.get("actuator_armed")
+        if aa is not None and "armed" in aa.data and "timestamp" in aa.data:
+            ts = np.asarray(aa.data["timestamp"], dtype=np.int64)
+            armed = np.asarray(aa.data["armed"]).astype(bool)
+            if ts.size > 1:
+                dt_us = np.diff(ts).astype(np.float64)
+                flight_time_s = float(np.sum(dt_us[armed[:-1]])) / 1e6
+
+    # Lifetime flight time — LND_FLIGHT_T_HI/LO together form a uint64 microsecond counter.
+    # (LO wraps every 2**32 us ≈ 71.6 minutes; HI tracks the wraps.)
+    lifetime_s = 0.0
+    hi = params.get("LND_FLIGHT_T_HI", 0)
+    lo = params.get("LND_FLIGHT_T_LO", 0)
+    if isinstance(hi, (int, float)) and isinstance(lo, (int, float)) and (hi or lo):
+        lifetime_us = int(hi) * (1 << 32) + int(lo)
+        lifetime_s = lifetime_us / 1e6
+
+    # Trajectory-derived stats (vehicle_local_position).
+    distance_m = 0.0
+    max_alt_diff_m = 0.0
+    max_v = max_vh = max_vz_up = max_vz_dn = 0.0
+    lp = state.datasets.get("vehicle_local_position")
+    if lp is not None:
+        x = np.asarray(lp.data.get("x")) if "x" in lp.data else None
+        y = np.asarray(lp.data.get("y")) if "y" in lp.data else None
+        z = np.asarray(lp.data.get("z")) if "z" in lp.data else None
+        vx = np.asarray(lp.data.get("vx")) if "vx" in lp.data else None
+        vy = np.asarray(lp.data.get("vy")) if "vy" in lp.data else None
+        vz = np.asarray(lp.data.get("vz")) if "vz" in lp.data else None
+        if x is not None and y is not None and x.size > 1:
+            dx = np.diff(x); dy = np.diff(y)
+            distance_m = float(np.nansum(np.sqrt(dx * dx + dy * dy)))
+        if z is not None and z.size > 0:
+            z_valid = z[np.isfinite(z)]
+            if z_valid.size > 0:
+                max_alt_diff_m = float(z_valid.max() - z_valid.min())
+        if vx is not None and vy is not None and vz is not None and vx.size > 0:
+            speed = np.sqrt(vx * vx + vy * vy + vz * vz)
+            speed_h = np.sqrt(vx * vx + vy * vy)
+            max_v = float(np.nanmax(speed)) if speed.size else 0.0
+            max_vh = float(np.nanmax(speed_h)) if speed_h.size else 0.0
+            max_vz_up = float(np.nanmax(-vz)) if vz.size else 0.0     # NED: -vz is up
+            max_vz_dn = float(np.nanmax(vz)) if vz.size else 0.0      # NED: +vz is down
+
+    # Max tilt angle from quaternion (angle between body-z and world-z).
+    max_tilt_deg = 0.0
+    att = state.datasets.get("vehicle_attitude")
+    if att is not None:
+        q1 = np.asarray(att.data.get("q[1]")) if "q[1]" in att.data else None
+        q2 = np.asarray(att.data.get("q[2]")) if "q[2]" in att.data else None
+        if q1 is not None and q2 is not None and q1.size > 0:
+            cos_tilt = np.clip(1.0 - 2.0 * (q1 * q1 + q2 * q2), -1.0, 1.0)
+            tilt = np.degrees(np.arccos(cos_tilt))
+            max_tilt_deg = float(np.nanmax(tilt))
+
+    avg_speed = 0.0
+    if flight_time_s > 0 and distance_m > 0:
+        avg_speed = distance_m / flight_time_s
+
+    return {
+        "ok": True,
+        "airframe_group": af_group,
+        "airframe_name": af_name,
+        "airframe_id": airframe_id,
+        "hardware": info_dict.get("ver_hw", "—"),
+        "sw_version": sw_decoded or "—",
+        "sw_hash": sw_short,
+        "branch": info_dict.get("ver_sw_branch", "—"),
+        "os_label": (info_dict.get("sys_os_name", "") + (
+            f", {os_decoded}" if os_decoded else "")).strip(", ") or "—",
+        "estimator": estimator,
+        "logging_duration_s": duration_s,
+        "flight_time_s": flight_time_s,
+        "lifetime_s": lifetime_s,
+        "distance_m": distance_m,
+        "max_altitude_diff_m": max_alt_diff_m,
+        "avg_speed_kmh": avg_speed * 3.6,
+        "max_speed_kmh": max_v * 3.6,
+        "max_speed_horizontal_kmh": max_vh * 3.6,
+        "max_speed_up_kmh": max_vz_up * 3.6,
+        "max_speed_down_kmh": max_vz_dn * 3.6,
+        "max_tilt_deg": max_tilt_deg,
+    }
+
+
+@eel.expose
+def get_current_state() -> dict:
+    """Return whether a file is currently loaded + its summary (used on page load)."""
+    if not state.ulog or not state.current_file:
+        return {"ok": True, "loaded": False}
+    topics = [_topic_summary(state.datasets[k]) for k in sorted(state.datasets.keys())]
+    total_fields = sum(len(t["fields"]) for t in topics)
+    return {
+        "ok": True,
+        "loaded": True,
+        "file_name": os.path.basename(state.current_file),
+        "file_path": state.current_file,
+        "topics": topics,
+        "n_topics": len(topics),
+        "n_fields": total_fields,
+    }
+
+
 @eel.expose
 def get_default_plot_data() -> dict:
     """Return PX4 Flight Review-style panels for the loaded file."""
@@ -701,7 +1033,7 @@ def main():
     # Pick a reasonable default size; close_callback prevents the Python process from hanging.
     try:
         eel.start(
-            "index.html",
+            "default.html",
             size=(1440, 900),
             mode="default",   # uses Chrome/Edge if available
             block=True,
@@ -710,7 +1042,7 @@ def main():
         pass
     except Exception as e:
         print(f"eel.start failed ({e}); retrying with mode=None (will print URL).")
-        eel.start("index.html", mode=None, host="localhost", port=8765, block=True)
+        eel.start("default.html", mode=None, host="localhost", port=8765, block=True)
 
 
 if __name__ == "__main__":
