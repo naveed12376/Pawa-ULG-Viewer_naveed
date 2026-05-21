@@ -212,18 +212,7 @@ function buildInfoCard(info) {
   const left = document.createElement("div");
   left.className = "info-col";
 
-  const airframe = info.airframe_group
-    ? `${info.airframe_group} <span class="dim">/ ${info.airframe_name}</span>`
-    : "—";
-  const sw = info.sw_version + (info.sw_hash ? `  <span class="hash">(${info.sw_hash})</span>` : "");
-  const branch = info.branch && info.branch !== "—" ? `<br><span class="dim">branch: ${info.branch}</span>` : "";
-
   const leftRows = [
-    ["Airframe",        airframe],
-    ["Hardware",        info.hardware],
-    ["Software Version", sw + branch],
-    ["OS Version",      info.os_label],
-    ["Estimator",       info.estimator],
     ["Logging Duration", formatDuration(info.logging_duration_s)],
     ["Vehicle Life Flight Time",
         info.lifetime_s > 0 ? formatHuman(info.lifetime_s) : formatHuman(info.flight_time_s)],
