@@ -208,42 +208,35 @@ function buildInfoCard(info) {
   const grid = document.createElement("div");
   grid.className = "info-grid";
 
-  // Left column — vehicle/software
-  const left = document.createElement("div");
-  left.className = "info-col";
+  const f = (n, unit) => (n != null && isFinite(n) ? `${n.toFixed(1)} ${unit}` : "—");
 
-  const leftRows = [
+  // All entries in one list, then split evenly across two columns.
+  const rows = [
     ["Logging Duration", formatDuration(info.logging_duration_s)],
     ["Vehicle Life Flight Time",
         info.lifetime_s > 0 ? formatHuman(info.lifetime_s) : formatHuman(info.flight_time_s)],
-  ];
-  for (const [label, value] of leftRows) {
-    const l = document.createElement("div"); l.className = "info-label"; l.textContent = label + ":";
-    const v = document.createElement("div"); v.className = "info-value"; v.innerHTML = value;
-    left.appendChild(l); left.appendChild(v);
-  }
-  grid.appendChild(left);
-
-  // Right column — flight stats
-  const right = document.createElement("div");
-  right.className = "info-col";
-  const f = (n, unit) => (n != null && isFinite(n) ? `${n.toFixed(1)} ${unit}` : "—");
-  const rightRows = [
-    ["Distance",             f(info.distance_m, "m")],
+    ["Distance",                f(info.distance_m, "m")],
     ["Max Altitude Difference", f(info.max_altitude_diff_m, "m")],
-    ["Average Speed",        f(info.avg_speed_kmh, "km/h")],
-    ["Max Speed",            f(info.max_speed_kmh, "km/h")],
-    ["Max Speed Horizontal", f(info.max_speed_horizontal_kmh, "km/h")],
-    ["Max Speed Up",         f(info.max_speed_up_kmh, "km/h")],
-    ["Max Speed Down",       f(info.max_speed_down_kmh, "km/h")],
-    ["Max Tilt Angle",       f(info.max_tilt_deg, "deg")],
+    ["Average Speed",           f(info.avg_speed_kmh, "km/h")],
+    ["Max Speed",               f(info.max_speed_kmh, "km/h")],
+    ["Max Speed Horizontal",    f(info.max_speed_horizontal_kmh, "km/h")],
+    ["Max Speed Up",            f(info.max_speed_up_kmh, "km/h")],
+    ["Max Speed Down",          f(info.max_speed_down_kmh, "km/h")],
+    ["Max Tilt Angle",          f(info.max_tilt_deg, "deg")],
   ];
-  for (const [label, value] of rightRows) {
-    const l = document.createElement("div"); l.className = "info-label"; l.textContent = label + ":";
-    const v = document.createElement("div"); v.className = "info-value"; v.textContent = value;
-    right.appendChild(l); right.appendChild(v);
+
+  const half = Math.ceil(rows.length / 2);
+  const columns = [rows.slice(0, half), rows.slice(half)];
+  for (const colRows of columns) {
+    const col = document.createElement("div");
+    col.className = "info-col";
+    for (const [label, value] of colRows) {
+      const l = document.createElement("div"); l.className = "info-label"; l.textContent = label + ":";
+      const v = document.createElement("div"); v.className = "info-value"; v.innerHTML = value;
+      col.appendChild(l); col.appendChild(v);
+    }
+    grid.appendChild(col);
   }
-  grid.appendChild(right);
 
   wrap.appendChild(grid);
   return wrap;

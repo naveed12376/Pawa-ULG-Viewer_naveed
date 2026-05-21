@@ -49,13 +49,14 @@
 .info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 32px;
+  gap: 6px 48px;
+  align-items: start;
 }
 .info-col {
   display: grid;
-  grid-template-columns: minmax(140px, max-content) 1fr;
-  gap: 6px 16px;
-  align-items: baseline;
+  grid-template-columns: minmax(150px, max-content) 1fr;
+  gap: 8px 16px;
+  align-content: start;
 }
 .info-label {
   color: var(--text-dim);
