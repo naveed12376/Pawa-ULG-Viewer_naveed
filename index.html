@@ -3,7 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pawa ULG Viewer</title>
+  <title>Pawa ULG Viewer — Online PX4 ULog (.ulg) Flight Log Viewer</title>
+  <meta name="description" content="Free online PX4 ULog viewer. Drag & drop a .ulg flight log to see PX4 Flight Review plots, the GPS track on a satellite map, plus attitude, battery and sensor data — all in your browser. No upload, nothing to install." />
+  <meta name="keywords" content="ULog viewer, ulg viewer, PX4 log, PX4 flight review, .ulg file, drone flight log, online ulog viewer, PX4 log analyzer, flight log viewer, pyulog online" />
+  <meta name="author" content="Muhammad Talha" />
+  <meta name="robots" content="index, follow" />
+  <meta name="theme-color" content="#0b0d17" />
+  <link rel="canonical" href="https://muhammadtalhapawa.github.io/Pawa-ULG-Viewer/" />
+
+  <!-- Open Graph (link previews on Facebook, LinkedIn, WhatsApp, Slack…) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Pawa ULG Viewer" />
+  <meta property="og:title" content="Pawa ULG Viewer — Online PX4 ULog (.ulg) Flight Log Viewer" />
+  <meta property="og:description" content="Drag & drop a PX4 .ulg flight log and view Flight Review plots, a GPS satellite map, and custom signal plots — entirely in your browser." />
+  <meta property="og:url" content="https://muhammadtalhapawa.github.io/Pawa-ULG-Viewer/" />
+  <meta property="og:image" content="https://muhammadtalhapawa.github.io/Pawa-ULG-Viewer/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter / X card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Pawa ULG Viewer — Online PX4 ULog (.ulg) Flight Log Viewer" />
+  <meta name="twitter:description" content="View PX4 .ulg flight logs in your browser: Flight Review plots, GPS satellite map, and custom plots. No upload required." />
+  <meta name="twitter:image" content="https://muhammadtalhapawa.github.io/Pawa-ULG-Viewer/og-image.png" />
+
+  <!-- Structured data: helps Google understand this is a free web app -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Pawa ULG Viewer",
+    "url": "https://muhammadtalhapawa.github.io/Pawa-ULG-Viewer/",
+    "description": "Free online PX4 ULog (.ulg) flight-log viewer. View Flight Review plots, a GPS satellite map, and custom signal plots entirely in the browser.",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Any (web browser)",
+    "browserRequirements": "Requires JavaScript",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "Muhammad Talha" }
+  }
+  </script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2367e8f9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z'/><path d='m21.854 2.147-10.94 10.939'/></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
