@@ -201,6 +201,7 @@ async function loadFile(path) {
 function renderTopics() {
   const q = state.filterText.trim().toLowerCase();
   const container = els.topicList;
+  const prevScroll = container.scrollTop;  // preserve scroll across rebuild
   container.innerHTML = "";
 
   if (!state.topics.length) {
@@ -319,6 +320,7 @@ function renderTopics() {
     container.appendChild(topicEl);
   }
   els.topicCount.textContent = String(shownTopicCount);
+  container.scrollTop = prevScroll;  // restore scroll position
 }
 
 function toggleTopicSelection(name) {
