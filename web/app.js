@@ -569,7 +569,11 @@ function renderPlot(groups) {
   // One y-axis per group: yaxis, yaxis2, ..., share x-axis. Stack vertically.
   const subplotHeight = 220;
   const gap = 60;
-  const totalHeight = Math.max(420, n * subplotHeight + (n - 1) * gap + 80);
+  // Fill the whole plot area when content is short; grow + scroll when tall.
+  const avail = (els.plot.clientHeight && els.plot.clientHeight > 200)
+    ? els.plot.clientHeight - 6 : 600;
+  const computed = n * subplotHeight + (n - 1) * gap + 80;
+  const totalHeight = Math.max(avail, computed);
 
   const yAxisLayout = {};
   let colorIdx = 0;
@@ -709,6 +713,20 @@ document.getElementById("themeToggle").addEventListener("click", () => {
   applyTheme(next);
   // Update plot colors in place — no re-render, no scroll/layout shift.
   applyThemeToPlots();
+});
+
+// Keep the plot filling the available height when the window is resized.
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+  if (!_lastPlotGroups || !els.plot._fullLayout) return;
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    const n = _lastPlotGroups.length;
+    const avail = (els.plot.clientHeight && els.plot.clientHeight > 200)
+      ? els.plot.clientHeight - 6 : 600;
+    const computed = n * 220 + (n - 1) * 60 + 80;
+    Plotly.relayout(els.plot, { height: Math.max(avail, computed) });
+  }, 150);
 });
 
 // ========== Boot ==========
