@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pawa ULG Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2367e8f9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z'/><path d='m21.854 2.147-10.94 10.939'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="landing-body">
+  <div class="aurora">
+    <span class="aurora-blob blob-1"></span>
+    <span class="aurora-blob blob-2"></span>
+    <span class="aurora-blob blob-3"></span>
+  </div>
+
+  <main class="landing">
+    <div id="dropZone" class="landing-drop" role="button" tabindex="0" title="Drop a .ulg file or click to browse">
+      <div class="landing-icon">
+        <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <h1 class="landing-title">Drop your ULG file</h1>
+      <p class="landing-sub">Drag &amp; drop a <code>.ulg</code> file here, or click to browse your PC</p>
+      <div id="landingStatus" class="landing-status"></div>
+      <div id="landingProgress" class="landing-progress" hidden>
+        <div id="landingProgressBar" class="landing-progress-bar"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="ulog-parser.js"></script>
+  <script src="analysis.js"></script>
+  <script src="store.js"></script>
+  <script src="landing.js"></script>
+</body>
+</html>
