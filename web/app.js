@@ -70,9 +70,6 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 const els = {
   browseBtn:    $("#browseBtn"),
-  quickPickBtn: $("#quickPickBtn"),
-  quickPickMenu:$("#quickPickMenu"),
-  quickPickList:$("#quickPickList"),
   defaultBtn:   $("#defaultBtn"),
   plotBtn:      $("#plotBtn"),
   plotAllBtn:   $("#plotAllBtn"),
@@ -174,39 +171,6 @@ function setupDragAndDrop({ dropOverlay, onFile }) {
     }
   });
 }
-
-els.quickPickBtn.addEventListener("click", async (e) => {
-  e.stopPropagation();
-  if (!els.quickPickMenu.hidden) {
-    els.quickPickMenu.hidden = true;
-    return;
-  }
-  const files = await eel.list_data_dir()();
-  els.quickPickList.innerHTML = "";
-  if (!files.length) {
-    els.quickPickList.innerHTML = `<div class="empty-state">No .ulg files in data/.</div>`;
-  } else {
-    files.forEach(f => {
-      const div = document.createElement("div");
-      div.className = "popover-item";
-      div.innerHTML = `<span>${f.name}</span><span class="popover-item-size">${f.size_kb} KB</span>`;
-      div.addEventListener("click", () => {
-        els.quickPickMenu.hidden = true;
-        loadFile(f.path);
-      });
-      els.quickPickList.appendChild(div);
-    });
-  }
-  els.quickPickMenu.hidden = false;
-});
-
-document.addEventListener("click", (e) => {
-  if (!els.quickPickMenu.hidden &&
-      !els.quickPickMenu.contains(e.target) &&
-      e.target !== els.quickPickBtn) {
-    els.quickPickMenu.hidden = true;
-  }
-});
 
 async function loadFile(path) {
   setStatus(`Loading ${path}...`);
