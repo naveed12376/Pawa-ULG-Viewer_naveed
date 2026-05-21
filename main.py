@@ -1,7 +1,17 @@
-"""ULG (PX4 ULog) File Viewer — Eel (HTML/CSS/JS) edition.
+"""Pawa ULG Viewer — Flask backend.
 
-Python backend that exposes ULog parsing to a web-based frontend.
-Favorites are persisted to settings.txt in the workspace.
+Serves the web/ frontend and a small JSON API for parsing PX4 ULog files.
+
+Multi-user safe:
+  * Each browser gets a session cookie; the parsed ULog for that session is
+    held in an in-memory per-session store (keyed by session id).
+  * Uploaded files are written to a temp file only long enough to parse them,
+    then deleted immediately — the parsed data lives in RAM, not on disk.
+  * A background sweeper evicts idle sessions (freeing their RAM) after a TTL,
+    and replacing a session's file frees the previous one.
+
+Favorites and the theme are stored per-user in the browser's localStorage
+(see web/app.js / web/api.js), so there is no shared server-side user state.
 """
 
 from __future__ import annotations
@@ -9,20 +19,21 @@ from __future__ import annotations
 import os
 import sys
 import math
+import time
+import uuid
 import tempfile
+import threading
+import webbrowser
 from typing import Dict, List, Tuple, Optional
 
-import eel
-import bottle
 import numpy as np
-
-# Allow large multipart uploads to spill to a temp file instead of RAM.
-bottle.BaseRequest.MEMFILE_MAX = 8 * 1024 * 1024  # 8 MB in-memory threshold
+from flask import Flask, request, session, jsonify, send_from_directory
+from werkzeug.local import LocalProxy
 
 try:
     from pyulog import ULog
 except ImportError:
-    print("Missing dependency: pyulog. Install it via:  pip install pyulog eel numpy")
+    print("Missing dependency: pyulog. Install it via:  pip install pyulog flask numpy")
     sys.exit(1)
 
 
@@ -30,13 +41,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 WEB_DIR = os.path.join(SCRIPT_DIR, "web")
 
+# Idle sessions older than this are evicted (their parsed ULog freed from RAM).
+SESSION_TTL_SECONDS = 30 * 60
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB hard cap
 
-# ----------------------------- State ----------------------------- #
-class AppState:
+app = Flask(__name__, static_folder=None)
+app.secret_key = os.environ.get("PAWA_SECRET_KEY") or os.urandom(32)
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+
+
+# ----------------------------- Per-session state ----------------------------- #
+class Store:
+    """Holds one session's parsed ULog. `state` resolves to the caller's store."""
     def __init__(self):
         self.ulog: Optional[ULog] = None
         self.current_file: Optional[str] = None
         self.datasets: Dict[str, object] = {}
+        self.last_access: float = time.time()
 
     def reset(self):
         self.ulog = None
@@ -44,12 +65,61 @@ class AppState:
         self.datasets = {}
 
 
-state = AppState()
+_SESSIONS: Dict[str, Store] = {}
+_SESSIONS_LOCK = threading.Lock()
+_EMPTY_STORE = Store()  # used when there is no request/session context
 
 
-# Favorites are stored per-user in the browser's localStorage (see web/app.js),
-# so there are no server-side favorites endpoints — this keeps each visitor's
-# favorites separate when the app is served publicly.
+def _session_id() -> str:
+    sid = session.get("sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["sid"] = sid
+        session.permanent = True
+    return sid
+
+
+def _get_store(create: bool = True) -> Optional[Store]:
+    """Return the Store for the current session (creating it on demand)."""
+    try:
+        sid = _session_id()
+    except RuntimeError:
+        # No request context (e.g. called outside a route) — return empty.
+        return _EMPTY_STORE if not create else _EMPTY_STORE
+    with _SESSIONS_LOCK:
+        st = _SESSIONS.get(sid)
+        if st is None and create:
+            st = Store()
+            _SESSIONS[sid] = st
+        if st is not None:
+            st.last_access = time.time()
+        return st
+
+
+# Module-level proxy so all the analysis functions below can keep using
+# `state.ulog` / `state.datasets` and transparently hit the caller's session.
+state = LocalProxy(lambda: _get_store(create=True) or _EMPTY_STORE)
+
+
+def _evict_idle_sessions() -> None:
+    now = time.time()
+    with _SESSIONS_LOCK:
+        stale = [sid for sid, st in _SESSIONS.items()
+                 if now - st.last_access > SESSION_TTL_SECONDS]
+        for sid in stale:
+            _SESSIONS.pop(sid, None)
+
+
+def _sweeper_loop() -> None:
+    while True:
+        time.sleep(120)
+        try:
+            _evict_idle_sessions()
+        except Exception:
+            pass
+
+
+threading.Thread(target=_sweeper_loop, daemon=True).start()
 
 
 # --------------------- Helpers --------------------- #
@@ -81,73 +151,33 @@ def _topic_summary(d) -> dict:
     }
 
 
-# --------------------- Eel-exposed API --------------------- #
-@eel.expose
-def list_data_dir() -> list:
-    """List ULG files in the workspace data/ directory."""
-    if not os.path.isdir(DATA_DIR):
-        return []
-    files = []
-    for name in sorted(os.listdir(DATA_DIR)):
-        if name.lower().endswith(".ulg"):
-            full = os.path.join(DATA_DIR, name)
-            files.append({
-                "name": name,
-                "path": full,
-                "size_kb": round(os.path.getsize(full) / 1024, 1),
-            })
-    return files
-
-
-@eel.expose
-def browse_file() -> Optional[str]:
-    """Open a native file dialog and return the chosen path (or None)."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        initial = DATA_DIR if os.path.isdir(DATA_DIR) else SCRIPT_DIR
-        path = filedialog.askopenfilename(
-            title="Select a ULG File",
-            initialdir=initial,
-            filetypes=[("ULog files", "*.ulg"), ("All files", "*.*")],
-        )
-        root.destroy()
-        return path or None
-    except Exception as e:
-        print(f"File dialog failed: {e}")
-        return None
-
-
-@eel.expose
-def load_file(path: str) -> dict:
-    """Parse a ULG file and return its topic summary."""
-    if not path or not os.path.isfile(path):
-        return {"ok": False, "error": f"File not found: {path}"}
+# --------------------- Loading + summaries --------------------- #
+def _load_into_store(store: Store, path: str, display_name: str) -> dict:
+    """Parse `path` into `store`. The caller deletes the temp file afterwards."""
     try:
         ulog = ULog(path)
     except Exception as e:
         return {"ok": False, "error": f"Could not parse ULG: {e}"}
 
-    state.ulog = ulog
-    state.current_file = path
-    state.datasets = {_topic_key(d): d for d in ulog.data_list}
+    store.ulog = ulog
+    store.current_file = display_name
+    store.datasets = {_topic_key(d): d for d in ulog.data_list}
+    return _store_summary(store)
 
-    topics = [_topic_summary(state.datasets[k]) for k in sorted(state.datasets.keys())]
+
+def _store_summary(store: Store) -> dict:
+    topics = [_topic_summary(store.datasets[k]) for k in sorted(store.datasets.keys())]
     total_fields = sum(len(t["fields"]) for t in topics)
     return {
         "ok": True,
-        "file_name": os.path.basename(path),
-        "file_path": path,
+        "file_name": store.current_file,
+        "file_path": store.current_file,
         "topics": topics,
         "n_topics": len(topics),
         "n_fields": total_fields,
     }
 
 
-@eel.expose
 def get_series(selections: list) -> dict:
     """For each {topic, field} selection, return time + value arrays.
 
@@ -197,7 +227,6 @@ def get_series(selections: list) -> dict:
     return {"ok": True, "groups": groups}
 
 
-@eel.expose
 def get_all_topics_data() -> dict:
     """Return data for every topic - used by 'Plot All Overview'."""
     if not state.ulog:
@@ -724,53 +753,6 @@ def _build_default_panels() -> List[dict]:
     return panels
 
 
-# --------------- Drag-drop path resolution (no upload) --------------- #
-@eel.expose
-def resolve_dropped_file(name: str) -> dict:
-    """Resolve a dropped file by NAME only (browser strips the absolute path).
-
-    Searches the workspace data/ folder and SCRIPT_DIR for a matching file.
-    Returns {ok, path} on success, or {ok: False, error} otherwise.
-    """
-    if not name:
-        return {"ok": False, "error": "Empty filename."}
-    base = os.path.basename(name)
-    # Search candidate directories in priority order.
-    search_dirs = [DATA_DIR, SCRIPT_DIR]
-    for d in search_dirs:
-        if not os.path.isdir(d):
-            continue
-        candidate = os.path.join(d, base)
-        if os.path.isfile(candidate):
-            return {"ok": True, "path": candidate}
-    return {"ok": False, "error": (
-        f"Could not locate '{base}' in the data/ folder."
-    )}
-
-
-# --------- Fast binary upload via HTTP POST (drag-drop from anywhere) --------- #
-# A single multipart/form-data POST streams the raw file straight to disk — no
-# base64, no per-chunk websocket round-trips. This is the fast path used by the
-# landing page's drag-drop / browse fallback.
-@bottle.post("/upload_ulg")
-def _http_upload_ulg():
-    upload = bottle.request.files.get("file")
-    if upload is None:
-        bottle.response.status = 400
-        return {"ok": False, "error": "No file in request."}
-    safe_name = os.path.basename(upload.raw_filename or "dropped.ulg")
-    fd, path = tempfile.mkstemp(suffix=f"_{safe_name}", prefix="ulg_upload_")
-    os.close(fd)
-    try:
-        upload.save(path, overwrite=True)
-    except Exception as e:
-        bottle.response.status = 500
-        return {"ok": False, "error": f"Could not save upload: {e}"}
-    result = load_file(path)
-    bottle.response.content_type = "application/json"
-    return result
-
-
 # ----------------------- ULog metadata + flight stats ----------------------- #
 # Common PX4 SITL airframes — extend as needed.
 AIRFRAME_NAMES: Dict[int, Tuple[str, str]] = {
@@ -811,7 +793,6 @@ def _decode_os_version(v) -> str:
     return f"v{major}.{minor}.{patch}"
 
 
-@eel.expose
 def get_file_info() -> dict:
     """Extract metadata + flight statistics from the currently loaded ULog."""
     if not state.ulog:
@@ -931,25 +912,16 @@ def get_file_info() -> dict:
     }
 
 
-@eel.expose
 def get_current_state() -> dict:
     """Return whether a file is currently loaded + its summary (used on page load)."""
-    if not state.ulog or not state.current_file:
+    store = _get_store(create=False)
+    if store is None or not store.ulog or not store.current_file:
         return {"ok": True, "loaded": False}
-    topics = [_topic_summary(state.datasets[k]) for k in sorted(state.datasets.keys())]
-    total_fields = sum(len(t["fields"]) for t in topics)
-    return {
-        "ok": True,
-        "loaded": True,
-        "file_name": os.path.basename(state.current_file),
-        "file_path": state.current_file,
-        "topics": topics,
-        "n_topics": len(topics),
-        "n_fields": total_fields,
-    }
+    summary = _store_summary(store)
+    summary["loaded"] = True
+    return summary
 
 
-@eel.expose
 def get_default_plot_data() -> dict:
     """Return PX4 Flight Review-style panels for the loaded file."""
     if not state.ulog:
@@ -964,22 +936,89 @@ def get_default_plot_data() -> dict:
     }
 
 
+# ------------------------------ Flask routes ------------------------------ #
+@app.post("/api/upload")
+def api_upload():
+    """Receive a ULG upload, parse it into the session store, delete the temp file."""
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"ok": False, "error": "No file in request."}), 400
+
+    safe_name = os.path.basename(f.filename) or "dropped.ulg"
+    fd, tmp_path = tempfile.mkstemp(suffix=f"_{safe_name}", prefix="ulg_upload_")
+    os.close(fd)
+    try:
+        f.save(tmp_path)                       # stream upload straight to disk
+        store = _get_store(create=True)
+        store.reset()                          # free any previously loaded file
+        result = _load_into_store(store, tmp_path, safe_name)
+    except Exception as e:
+        result = {"ok": False, "error": f"Upload failed: {e}"}
+    finally:
+        # The parsed data now lives in RAM — remove the temp file immediately.
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+    return jsonify(result)
+
+
+@app.get("/api/state")
+def api_state():
+    return jsonify(get_current_state())
+
+
+@app.post("/api/series")
+def api_series():
+    body = request.get_json(force=True, silent=True) or {}
+    return jsonify(get_series(body.get("selections", [])))
+
+
+@app.get("/api/all_topics")
+def api_all_topics():
+    return jsonify(get_all_topics_data())
+
+
+@app.get("/api/default_plots")
+def api_default_plots():
+    return jsonify(get_default_plot_data())
+
+
+@app.get("/api/file_info")
+def api_file_info():
+    return jsonify(get_file_info())
+
+
+@app.post("/api/close")
+def api_close():
+    """Explicitly drop the current session's loaded file (frees its RAM)."""
+    store = _get_store(create=False)
+    if store is not None:
+        store.reset()
+    return jsonify({"ok": True})
+
+
+# ------------------------------ Static files ------------------------------ #
+@app.get("/")
+def index():
+    return send_from_directory(WEB_DIR, "landing.html")
+
+
+@app.get("/<path:path>")
+def static_files(path):
+    return send_from_directory(WEB_DIR, path)
+
+
 # ------------------------------ Main ------------------------------ #
 def main():
-    eel.init(WEB_DIR)
-    # Pick a reasonable default size; close_callback prevents the Python process from hanging.
-    try:
-        eel.start(
-            "landing.html",
-            size=(1440, 900),
-            mode="default",   # uses Chrome/Edge if available
-            block=True,
-        )
-    except (SystemExit, KeyboardInterrupt):
-        pass
-    except Exception as e:
-        print(f"eel.start failed ({e}); retrying with mode=None (will print URL).")
-        eel.start("landing.html", mode=None, host="localhost", port=8765, block=True)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
+    url = f"http://{host}:{port}/"
+    # Open the default browser shortly after the server comes up (local use).
+    if os.environ.get("PAWA_NO_BROWSER") != "1":
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    print(f"Pawa ULG Viewer running at {url}")
+    app.run(host=host, port=port, threaded=True, debug=False)
 
 
 if __name__ == "__main__":

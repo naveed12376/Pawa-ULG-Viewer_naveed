@@ -387,12 +387,22 @@ function showWelcome(msg) {
   if (msg) setStatus(msg);
 }
 
-// ----- File loading -----
-async function loadFile(path) {
-  setStatus(`Loading ${path}…`);
-  const res = await eel.load_file(path)();
-  if (!res.ok) {
-    toast(res.error || "Failed to load file.", "error");
+// ----- File loading (upload) -----
+async function uploadAndLoad(file) {
+  if (!file.name.toLowerCase().endsWith(".ulg")) {
+    toast("Only .ulg files are supported.", "error");
+    return;
+  }
+  setStatus(`Uploading ${file.name}…`);
+  const res = await uploadUlgFile(file, (pct, loaded, total) => {
+    if (loaded != null && total != null) {
+      setStatus(`Uploading ${file.name} — ${formatBytes(loaded)} / ${formatBytes(total)}`);
+    } else {
+      setStatus("Parsing ULG…");
+    }
+  });
+  if (!res || !res.ok) {
+    toast(res && res.error ? res.error : "Failed to load file.", "error");
     setStatus("Load failed.");
     return;
   }
@@ -403,31 +413,19 @@ async function loadFile(path) {
 }
 
 els.browseBtn.addEventListener("click", async () => {
-  setStatus("Opening file dialog…");
-  const path = await eel.browse_file()();
-  if (!path) { setStatus("File selection cancelled."); return; }
-  await loadFile(path);
+  const file = await pickUlgFile();
+  if (!file) return;
+  await uploadAndLoad(file);
 });
 
 els.customBtn.addEventListener("click", () => {
   window.location.href = "index.html";
 });
 
-// ----- Drag & drop (path resolution, no upload) -----
+// ----- Drag & drop (uploads the dropped file) -----
 setupDragAndDrop({
   dropOverlay: els.dropOverlay,
-  onFile: async (file) => {
-    if (!file.name.toLowerCase().endsWith(".ulg")) {
-      toast("Only .ulg files are supported.", "error");
-      return;
-    }
-    const res = await eel.resolve_dropped_file(file.name)();
-    if (!res.ok) {
-      toast(res.error || "Could not locate the file.", "error");
-      return;
-    }
-    await loadFile(res.path);
-  },
+  onFile: async (file) => { await uploadAndLoad(file); },
 });
 
 function setupDragAndDrop({ dropOverlay, onFile }) {
