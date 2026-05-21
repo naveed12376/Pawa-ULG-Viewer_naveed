@@ -452,12 +452,12 @@ function setupDragAndDrop({ dropOverlay, onFile }) {
 // ----- Theme toggle -----
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("ulg-theme", theme);
+  localStorage.setItem("pawa-ulg-theme", theme);
 }
 function currentTheme() {
   return document.documentElement.getAttribute("data-theme") || "dark";
 }
-applyTheme(localStorage.getItem("ulg-theme") || "dark");
+applyTheme(localStorage.getItem("pawa-ulg-theme") || "dark");
 
 function applyThemeToPlots() {
   const t = plotTheme();

@@ -2,7 +2,7 @@
 
 // Respect the saved theme (no toggle shown here).
 document.documentElement.setAttribute(
-  "data-theme", localStorage.getItem("ulg-theme") || "dark"
+  "data-theme", localStorage.getItem("pawa-ulg-theme") || "dark"
 );
 
 const dropZone = document.getElementById("dropZone");
