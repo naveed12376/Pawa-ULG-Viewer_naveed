@@ -5,6 +5,7 @@ const state = {
   selectedTopics: new Set(),   // topic names (topic-level selections, plot all fields)
   selectedFields: new Set(),   // "topic||field"
   selectedFavs: new Set(),     // "topic||field"
+  openTopics: new Set(),       // expanded topic names (preserved across re-renders)
   fileLoaded: false,
   filterText: "",
 };
@@ -254,8 +255,10 @@ function renderTopics() {
 
     shownTopicCount++;
 
+    // A topic is open if explicitly expanded, or auto-opened by an active filter.
+    const isOpen = state.openTopics.has(t.name) || !!q;
     const topicEl = document.createElement("div");
-    topicEl.className = "tree-topic" + (q ? " open" : "");
+    topicEl.className = "tree-topic" + (isOpen ? " open" : "");
 
     const header = document.createElement("div");
     header.className = "tree-topic-header";
@@ -271,6 +274,9 @@ function renderTopics() {
         // Treat as selection-toggle (topic-level == all fields)
         toggleTopicSelection(t.name);
       } else {
+        // Toggle expand/collapse and remember it across re-renders.
+        if (state.openTopics.has(t.name)) state.openTopics.delete(t.name);
+        else state.openTopics.add(t.name);
         topicEl.classList.toggle("open");
       }
     });
