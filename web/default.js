@@ -9,10 +9,6 @@ const els = {
   loading:     document.getElementById("loadingOverlay"),
   welcome:     document.getElementById("welcomeOverlay"),
   browseBtn:   document.getElementById("browseBtn"),
-  quickPickBtn:document.getElementById("quickPickBtn"),
-  quickPickMenu: document.getElementById("quickPickMenu"),
-  quickPickList: document.getElementById("quickPickList"),
-  printBtn:    document.getElementById("printBtn"),
   customBtn:   document.getElementById("customBtn"),
   toast:       document.getElementById("toast"),
   dropOverlay: document.getElementById("dropOverlay"),
@@ -409,41 +405,6 @@ els.browseBtn.addEventListener("click", async () => {
   if (!path) { setStatus("File selection cancelled."); return; }
   await loadFile(path);
 });
-
-els.quickPickBtn.addEventListener("click", async (e) => {
-  e.stopPropagation();
-  if (!els.quickPickMenu.hidden) {
-    els.quickPickMenu.hidden = true;
-    return;
-  }
-  const files = await eel.list_data_dir()();
-  els.quickPickList.innerHTML = "";
-  if (!files.length) {
-    els.quickPickList.innerHTML = `<div class="empty-state">No .ulg files in data/.</div>`;
-  } else {
-    files.forEach(f => {
-      const div = document.createElement("div");
-      div.className = "popover-item";
-      div.innerHTML = `<span>${f.name}</span><span class="popover-item-size">${f.size_kb} KB</span>`;
-      div.addEventListener("click", () => {
-        els.quickPickMenu.hidden = true;
-        loadFile(f.path);
-      });
-      els.quickPickList.appendChild(div);
-    });
-  }
-  els.quickPickMenu.hidden = false;
-});
-
-document.addEventListener("click", (e) => {
-  if (!els.quickPickMenu.hidden &&
-      !els.quickPickMenu.contains(e.target) &&
-      e.target !== els.quickPickBtn) {
-    els.quickPickMenu.hidden = true;
-  }
-});
-
-els.printBtn.addEventListener("click", () => window.print());
 
 els.customBtn.addEventListener("click", () => {
   window.location.href = "index.html";
