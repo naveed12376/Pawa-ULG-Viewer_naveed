@@ -728,6 +728,109 @@ body {
   opacity: 0.7;
 }
 
+/* ========== Landing page ========== */
+.landing {
+  flex: 1;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+.landing-drop {
+  width: min(640px, 90vw);
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 60px 48px;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 2px dashed var(--border-strong);
+  border-radius: 24px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.landing-drop:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 36px 70px -24px rgba(167, 139, 250, 0.5);
+}
+.landing-drop:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.22);
+}
+.landing-drop.drag-over {
+  border-color: var(--accent);
+  background: var(--surface-strong);
+  transform: scale(1.01);
+  box-shadow: 0 36px 80px -20px rgba(167, 139, 250, 0.65);
+}
+.landing-icon {
+  width: 96px; height: 96px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.16), rgba(103, 232, 249, 0.12));
+  border-radius: 24px;
+  color: var(--accent);
+  transition: transform 0.3s ease;
+}
+.landing-drop:hover .landing-icon,
+.landing-drop.drag-over .landing-icon {
+  transform: translateY(-4px) scale(1.04);
+}
+.landing-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.landing-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.landing-sub code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  color: var(--accent-2);
+  background: var(--bg-1);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.landing-status {
+  min-height: 18px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.landing-status.success { color: var(--success); }
+.landing-status.error { color: var(--danger); }
+
+.landing-progress {
+  width: 80%;
+  max-width: 360px;
+  height: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.landing-progress[hidden] { display: none; }
+.landing-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.12s ease;
+}
+
 /* ========== Drag-and-drop overlay ========== */
 .drop-overlay {
   position: fixed;

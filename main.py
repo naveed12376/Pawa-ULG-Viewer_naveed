@@ -9,11 +9,15 @@ from __future__ import annotations
 import os
 import sys
 import math
-import threading
+import tempfile
 from typing import Dict, List, Tuple, Optional
 
 import eel
+import bottle
 import numpy as np
+
+# Allow large multipart uploads to spill to a temp file instead of RAM.
+bottle.BaseRequest.MEMFILE_MAX = 8 * 1024 * 1024  # 8 MB in-memory threshold
 
 try:
     from pyulog import ULog
@@ -819,9 +823,31 @@ def resolve_dropped_file(name: str) -> dict:
         if os.path.isfile(candidate):
             return {"ok": True, "path": candidate}
     return {"ok": False, "error": (
-        f"Could not locate '{base}'. Drag-drop only resolves files inside "
-        f"the data/ folder. Use Browse to pick from anywhere."
+        f"Could not locate '{base}' in the data/ folder."
     )}
+
+
+# --------- Fast binary upload via HTTP POST (drag-drop from anywhere) --------- #
+# A single multipart/form-data POST streams the raw file straight to disk — no
+# base64, no per-chunk websocket round-trips. This is the fast path used by the
+# landing page's drag-drop / browse fallback.
+@bottle.post("/upload_ulg")
+def _http_upload_ulg():
+    upload = bottle.request.files.get("file")
+    if upload is None:
+        bottle.response.status = 400
+        return {"ok": False, "error": "No file in request."}
+    safe_name = os.path.basename(upload.raw_filename or "dropped.ulg")
+    fd, path = tempfile.mkstemp(suffix=f"_{safe_name}", prefix="ulg_upload_")
+    os.close(fd)
+    try:
+        upload.save(path, overwrite=True)
+    except Exception as e:
+        bottle.response.status = 500
+        return {"ok": False, "error": f"Could not save upload: {e}"}
+    result = load_file(path)
+    bottle.response.content_type = "application/json"
+    return result
 
 
 # ----------------------- ULog metadata + flight stats ----------------------- #
@@ -1033,7 +1059,7 @@ def main():
     # Pick a reasonable default size; close_callback prevents the Python process from hanging.
     try:
         eel.start(
-            "default.html",
+            "landing.html",
             size=(1440, 900),
             mode="default",   # uses Chrome/Edge if available
             block=True,
@@ -1042,7 +1068,7 @@ def main():
         pass
     except Exception as e:
         print(f"eel.start failed ({e}); retrying with mode=None (will print URL).")
-        eel.start("default.html", mode=None, host="localhost", port=8765, block=True)
+        eel.start("landing.html", mode=None, host="localhost", port=8765, block=True)
 
 
 if __name__ == "__main__":
