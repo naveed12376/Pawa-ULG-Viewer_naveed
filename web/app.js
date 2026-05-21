@@ -192,7 +192,7 @@ async function loadFile(path) {
   setStatus(`Loaded ${res.file_name} — ${res.n_topics} topics, ${res.n_fields} numeric fields.`);
 
   renderTopics();
-  await refreshFavorites();
+  refreshFavorites();
   resetPlotEmpty("Pick fields from Favorites or Topics, then click Plot Selected.");
   toast(`Loaded ${res.file_name}`, "success");
 }
@@ -334,10 +334,50 @@ els.searchInput.addEventListener("input", (e) => {
   renderTopics();
 });
 
-// ========== Favorites ==========
-async function refreshFavorites() {
-  const favs = await eel.check_favorites_in_file()();
-  state.favorites = favs;
+// ========== Favorites (per-user, stored in this browser's localStorage) ==========
+const FAV_STORAGE_KEY = "pawa-ulg-favorites";
+
+function loadStoredFavorites() {
+  try {
+    const raw = localStorage.getItem(FAV_STORAGE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const e of arr) {
+      if (!e || !e.topic || !e.field) continue;
+      const k = e.topic + "||" + e.field;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ topic: e.topic, field: e.field });
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveStoredFavorites(favs) {
+  try {
+    localStorage.setItem(FAV_STORAGE_KEY,
+      JSON.stringify(favs.map(f => ({ topic: f.topic, field: f.field }))));
+  } catch (_) { /* storage full / disabled — ignore */ }
+}
+
+// Is this topic/field present in the currently loaded file?
+function favIsPresent(topic, field) {
+  if (!state.fileLoaded) return false;
+  const t = state.topics.find(x => x.name === topic);
+  return !!(t && t.fields && t.fields.includes(field));
+}
+
+// Rebuild state.favorites from storage, annotating each with `present`.
+function refreshFavorites() {
+  const stored = loadStoredFavorites();
+  state.favorites = stored.map(f => ({
+    topic: f.topic, field: f.field, present: favIsPresent(f.topic, f.field),
+  }));
   renderFavorites();
 }
 
@@ -400,38 +440,54 @@ function renderFavorites() {
   });
 }
 
-async function addFavorite(topic, field) {
-  // If field is null -> add all fields of topic
+function addFavorite(topic, field) {
+  const favs = loadStoredFavorites();
+  const has = (t, f) => favs.some(x => x.topic === t && x.field === f);
+  let added = 0;
+
   if (field === null) {
-    const entries = [{ topic, field: null }];
-    await eel.add_favorites_bulk(entries)();
+    // Add every field of the topic.
+    const t = state.topics.find(x => x.name === topic);
+    if (t && t.fields) {
+      for (const f of t.fields) {
+        if (!has(topic, f)) { favs.push({ topic, field: f }); added++; }
+      }
+    }
   } else {
-    await eel.add_favorite(topic, field)();
+    if (!has(topic, field)) { favs.push({ topic, field }); added++; }
   }
-  await refreshFavorites();
-  toast(field === null ? `Added all "${topic}" fields to favorites` : `Added ${topic} · ${field}`, "success");
+
+  if (added > 0) {
+    saveStoredFavorites(favs);
+    refreshFavorites();
+    toast(field === null
+      ? `Added all "${topic}" fields to favorites`
+      : `Added ${topic} · ${field}`, "success");
+  } else {
+    toast("Already in favorites.");
+  }
 }
 
-async function removeFavorite(topic, field) {
-  await eel.remove_favorite(topic, field)();
+function removeFavorite(topic, field) {
+  const favs = loadStoredFavorites().filter(x => !(x.topic === topic && x.field === field));
+  saveStoredFavorites(favs);
   state.selectedFavs.delete(key(topic, field));
-  await refreshFavorites();
+  refreshFavorites();
   toast("Removed from favorites");
 }
 
-els.favRemoveBtn.addEventListener("click", async () => {
+els.favRemoveBtn.addEventListener("click", () => {
   if (!state.selectedFavs.size) {
     toast("Select favorites to remove.", "error");
     return;
   }
-  const entries = Array.from(state.selectedFavs).map(k => {
-    const [t, f] = k.split("||");
-    return { topic: t, field: f };
-  });
-  await eel.remove_favorites_bulk(entries)();
+  const drop = state.selectedFavs;
+  const favs = loadStoredFavorites().filter(x => !drop.has(key(x.topic, x.field)));
+  const removed = state.selectedFavs.size;
+  saveStoredFavorites(favs);
   state.selectedFavs.clear();
-  await refreshFavorites();
-  toast(`Removed ${entries.length} favorite(s)`);
+  refreshFavorites();
+  toast(`Removed ${removed} favorite(s)`);
 });
 
 // ========== Context menu ==========
@@ -713,12 +769,10 @@ window.addEventListener("resize", () => {
     els.fileStats.textContent = `${current.n_topics} topics · ${current.n_fields} fields`;
     setStatus(`Loaded ${current.file_name} — ${current.n_topics} topics, ${current.n_fields} numeric fields.`);
     renderTopics();
-    await refreshFavorites();
+    refreshFavorites();
     resetPlotEmpty("Pick fields from Favorites or Topics, then click Plot Selected.");
   } else {
-    const favs = await eel.get_favorites()();
-    state.favorites = favs.map(f => ({ ...f, present: false }));
-    renderFavorites();
+    refreshFavorites();
     renderTopics();
     setStatus("Ready. Click 'Browse ULG File' to begin.");
   }
