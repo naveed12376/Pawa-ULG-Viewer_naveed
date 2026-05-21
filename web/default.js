@@ -288,7 +288,28 @@ function renderMap(target, panel) {
   L.marker(start, { icon: dot("#4ade80"), title: "Start" }).addTo(map).bindPopup("Start");
   L.marker(end,   { icon: dot("#f87171"), title: "End"   }).addTo(map).bindPopup("End");
 
-  map.fitBounds(line.getBounds(), { padding: [24, 24] });
+  const fitToData = () => map.fitBounds(line.getBounds(), { padding: [24, 24] });
+  fitToData();
+
+  // "Center on data" button, bottom-right.
+  const RecenterControl = L.Control.extend({
+    options: { position: "bottomright" },
+    onAdd: function () {
+      const btn = L.DomUtil.create("button", "map-recenter-btn");
+      btn.type = "button";
+      btn.title = "Center on flight data";
+      btn.innerHTML =
+        `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ` +
+        `stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+        `<circle cx="12" cy="12" r="3"/>` +
+        `<path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
+      L.DomEvent.disableClickPropagation(btn);
+      L.DomEvent.on(btn, "click", (e) => { L.DomEvent.stop(e); fitToData(); });
+      return btn;
+    },
+  });
+  map.addControl(new RecenterControl());
+
   // Leaflet requires invalidateSize() once its container becomes visible/sized.
   requestAnimationFrame(() => map.invalidateSize());
 }
